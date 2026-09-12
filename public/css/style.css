@@ -82,6 +82,7 @@ main { padding: 24px; max-width: 1200px; margin: 0 auto; }
 
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin-bottom: 20px; }
 .panel h3 { margin-top: 0; font-size: 15px; color: var(--primary-dark); }
+.hint-text { color: var(--muted); font-size: 13px; margin-top: -4px; margin-bottom: 12px; }
 
 /* ---------- Toolbar / forms ---------- */
 .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }

@@ -70,7 +70,14 @@
   <!-- المزامنة -->
   <section id="sync" class="tab-content">
     <div class="panel">
-      <button id="runSyncBtn" class="btn-primary">🔄 شغّل المزامنة دلوقتي</button>
+      <h3>📥 استيراد كل منتجاتك من bol.com</h3>
+      <p class="hint-text">بيسحب كل عروضك الحالية على bol.com ويطابقها بالمخزون عندك عن طريق الباركود (EAN) أو الـ SKU. ممكن ياخد دقيقة أو دقيقتين.</p>
+      <button id="importFromBolBtn" class="btn-primary">استيراد المنتجات من bol.com</button>
+      <p id="importStatus"></p>
+    </div>
+    <div class="panel">
+      <h3>🔄 المزامنة الدورية (طلبات + مخزون)</h3>
+      <button id="runSyncBtn" class="btn-primary">شغّل المزامنة دلوقتي</button>
       <p id="syncStatus"></p>
     </div>
     <div class="panel">

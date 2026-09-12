@@ -80,10 +80,64 @@ async function getOffers(page = 1) {
   return bolRequest('get', '/offers', { params: { page } });
 }
 
+// ---------- استيراد كل عروضي من bol.com (Offer Export) ----------
+// الخطوات: 1) نطلب تصدير  2) نستنى لحد ما يخلص (process-status)  3) ننزّل ملف الـ CSV
+async function requestOfferExport() {
+  const token = await getAccessToken();
+  const res = await axios.post(
+    `${BASE_URL}/offers/export`,
+    { format: 'CSV' },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: `application/vnd.retailer.${API_VERSION}+json`,
+        'Content-Type': `application/vnd.retailer.${API_VERSION}+json`
+      }
+    }
+  );
+  return res.data; // فيها processStatusId
+}
+
+async function getProcessStatus(processStatusId) {
+  return bolRequest('get', `/process-status/${processStatusId}`);
+}
+
+// بننتظر لحد ما يخلص التصدير (بيرجع الـ report-id لما يخلص)
+async function waitForExportReady(processStatusId, { maxAttempts = 30, delayMs = 4000 } = {}) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const status = await getProcessStatus(processStatusId);
+    if (status.status === 'SUCCESS') {
+      return status.entityId; // ده الـ report-id
+    }
+    if (status.status === 'FAILURE') {
+      throw new Error('فشل تجهيز ملف التصدير من bol.com: ' + (status.errorMessage || 'سبب غير معروف'));
+    }
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  throw new Error('استغرق تجهيز ملف التصدير وقت طويل جدًا - جرب تاني بعد شوية');
+}
+
+async function downloadOfferExportCsv(reportId) {
+  const token = await getAccessToken();
+  const res = await axios.get(`${BASE_URL}/offers/export/${reportId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: `application/vnd.retailer.${API_VERSION}+csv`
+    },
+    responseType: 'text',
+    transformResponse: [(data) => data] // نمنع axios يحاول يحوّلها JSON
+  });
+  return res.data; // نص CSV خام
+}
+
 module.exports = {
   getAccessToken,
   getOpenOrders,
   getOrderDetails,
   updateOfferStock,
-  getOffers
+  getOffers,
+  requestOfferExport,
+  getProcessStatus,
+  waitForExportReady,
+  downloadOfferExportCsv
 };

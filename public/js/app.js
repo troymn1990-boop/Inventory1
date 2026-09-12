@@ -219,6 +219,30 @@ async function loadReport() {
   `).join('') || '<tr><td colspan="5">مفيش مبيعات في الفترة دي</td></tr>';
 }
 
+// ================= استيراد من bol.com =================
+document.getElementById('importFromBolBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('importFromBolBtn');
+  const statusEl = document.getElementById('importStatus');
+  btn.disabled = true;
+  statusEl.textContent = '⏳ جاري السحب من bol.com... ممكن ياخد دقيقة أو دقيقتين، متقفلش الصفحة.';
+
+  try {
+    const res = await fetch('/api/sync/import-from-bol', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      statusEl.textContent = '❌ فشل الاستيراد: ' + (data.error || 'خطأ غير معروف');
+    } else {
+      statusEl.textContent = `✅ تم! إجمالي العروض: ${data.totalRows} | اتحدّث: ${data.updated} | اتضاف جديد: ${data.created}` +
+        (data.errors?.length ? ` | تحذيرات: ${data.errors.length} (شوف الـ console)` : '');
+      if (data.errors?.length) console.warn('تحذيرات الاستيراد:', data.errors);
+    }
+  } catch (e) {
+    statusEl.textContent = '❌ مشكلة في الاتصال بالسيرفر';
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // ================= المزامنة =================
 document.getElementById('runSyncBtn').addEventListener('click', async () => {
   const statusEl = document.getElementById('syncStatus');
