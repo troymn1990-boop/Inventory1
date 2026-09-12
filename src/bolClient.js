@@ -9,6 +9,7 @@ const axios = require('axios');
 
 const TOKEN_URL = 'https://login.bol.com/token?grant_type=client_credentials';
 const BASE_URL = 'https://api.bol.com/retailer';
+const SHARED_BASE_URL = 'https://api.bol.com/shared'; // مسار process-status مختلف عن باقي الـ retailer endpoints
 const API_VERSION = process.env.BOL_API_VERSION || 'v10';
 
 let cachedToken = null;
@@ -99,7 +100,15 @@ async function requestOfferExport() {
 }
 
 async function getProcessStatus(processStatusId) {
-  return bolRequest('get', `/process-status/${processStatusId}`);
+  // مسار process-status بيعيش تحت /shared مش تحت /retailer (تغيير من bol.com من v7)
+  const token = await getAccessToken();
+  const res = await axios.get(`${SHARED_BASE_URL}/process-status/${processStatusId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: `application/vnd.retailer.${API_VERSION}+json`
+    }
+  });
+  return res.data;
 }
 
 // بننتظر لحد ما يخلص التصدير (بيرجع الـ report-id لما يخلص)
