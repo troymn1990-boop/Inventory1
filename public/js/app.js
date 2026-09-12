@@ -71,6 +71,7 @@ async function loadProducts() {
       <td>${money(p.sell_price)}</td>
       <td>${p.stock_qty}</td>
       <td>
+        <button class="icon-btn" onclick="syncProductToBol(${p.id})" title="مزامنة مع bol.com">🔄</button>
         <button class="icon-btn" onclick="editProduct(${p.id})">✏️</button>
         <button class="icon-btn" onclick="deleteProduct(${p.id})">🗑️</button>
       </td>
@@ -105,6 +106,79 @@ document.getElementById('lowStockFilter').addEventListener('change', (e) => {
   productsState.page = 1;
   loadProducts();
 });
+
+// ---- مزامنة فردية مع bol.com ----
+window.syncProductToBol = async (id) => {
+  try {
+    const res = await fetch(`/api/products/${id}/push-to-bol`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      alert('فشلت المزامنة: ' + (data.error || 'خطأ غير معروف'));
+      return;
+    }
+    const lines = Object.entries(data.result).map(([k, v]) => {
+      const label = k === 'price' ? 'السعر' : k === 'stock' ? 'المخزون' : 'الـ SKU';
+      return `${label}: ${v}`;
+    });
+    alert('نتيجة المزامنة:\n' + lines.join('\n'));
+  } catch (e) {
+    alert('مشكلة في الاتصال بالسيرفر');
+  }
+};
+
+// ---- مزامنة جماعية مع bol.com ----
+let pushAllInterval = null;
+
+document.getElementById('pushAllBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('pushAllBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ جاري البدء...';
+
+  try {
+    const res = await fetch('/api/products/push-all-to-bol', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      alert('تعذّر بدء المزامنة: ' + (data.error || ''));
+      btn.disabled = false;
+      btn.textContent = '🔄 مزامنة الكل مع bol.com';
+      return;
+    }
+    pollPushAllStatus();
+  } catch (e) {
+    alert('مشكلة في الاتصال بالسيرفر');
+    btn.disabled = false;
+    btn.textContent = '🔄 مزامنة الكل مع bol.com';
+  }
+});
+
+function pollPushAllStatus() {
+  const btn = document.getElementById('pushAllBtn');
+  if (pushAllInterval) clearInterval(pushAllInterval);
+
+  pushAllInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/products/push-all-to-bol/status');
+      const job = await res.json();
+
+      if (job.status === 'running') {
+        btn.textContent = `⏳ جاري المزامنة... (${job.processed || 0}/${job.total || '?'})`;
+      } else if (job.status === 'success') {
+        clearInterval(pushAllInterval);
+        btn.disabled = false;
+        btn.textContent = '🔄 مزامنة الكل مع bol.com';
+        alert(`تمت مزامنة ${job.processed} منتج` + (job.errors?.length ? `\nتحذيرات: ${job.errors.length} (شوف الـ console)` : ''));
+        if (job.errors?.length) console.warn('تحذيرات المزامنة الجماعية:', job.errors);
+      } else if (job.status === 'error') {
+        clearInterval(pushAllInterval);
+        btn.disabled = false;
+        btn.textContent = '🔄 مزامنة الكل مع bol.com';
+        alert('حصل خطأ: ' + job.error);
+      }
+    } catch (e) {
+      // تجاهل وحاول تاني الدورة الجاية
+    }
+  }, 3000);
+}
 
 // ---- Modal إضافة/تعديل ----
 const modal = document.getElementById('productModal');

@@ -3,6 +3,7 @@ const multer = require('multer');
 const { parse } = require('csv-parse/sync');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
+const { pushProductToBol, startPushAllJob, getPushJobStatus } = require('../pushToBol');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -140,6 +141,28 @@ router.post('/import', upload.single('file'), (req, res) => {
   tx(records);
 
   res.json({ ok: true, imported, total: records.length, errors });
+});
+
+// مزامنة منتج واحد فوريًا مع bol.com (السعر + المخزون + الـ SKU)
+router.post('/:id/push-to-bol', async (req, res) => {
+  const product = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!product) return res.status(404).json({ error: 'المنتج مش موجود' });
+  try {
+    const result = await pushProductToBol(product);
+    res.json({ ok: true, result });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message });
+  }
+});
+
+// مزامنة كل المنتجات دفعة واحدة - شغالة في الخلفية (زي الاستيراد بالظبط)
+router.post('/push-all-to-bol', (req, res) => {
+  const job = startPushAllJob();
+  res.json({ ok: true, status: job.status });
+});
+
+router.get('/push-all-to-bol/status', (req, res) => {
+  res.json(getPushJobStatus());
 });
 
 module.exports = router;

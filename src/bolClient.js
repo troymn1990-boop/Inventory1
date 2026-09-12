@@ -76,6 +76,40 @@ async function updateOfferStock(offerId, stockQty) {
   });
 }
 
+// تحديث السعر لعرض (offer) معين على bol.com
+async function updateOfferPrice(offerId, price) {
+  return bolRequest('put', `/offers/${offerId}/price`, {
+    data: {
+      pricing: {
+        bundlePrices: [{ quantity: 1, unitPrice: Number(price) }]
+      }
+    }
+  });
+}
+
+// جلب تفاصيل عرض معين - مستخدمة قبل تحديث الـ reference (SKU) عشان منخسرش إعدادات تانية
+async function getOfferById(offerId) {
+  return bolRequest('get', `/offers/${offerId}`);
+}
+
+// تحديث الـ reference (اللي بنستخدمه كـ SKU) لعرض معين
+// ملحوظة: bol.com مش بتديك endpoint يحدّث الـ reference لوحده، فبنجيب العرض
+// الحالي كامل الأول عشان نحافظ على باقي إعداداته (condition, fulfilment...) ونغيّر الـ reference بس
+async function updateOfferReference(offerId, reference) {
+  const current = await getOfferById(offerId);
+  const payload = {
+    ean: current.ean,
+    condition: current.condition,
+    reference: reference,
+    onHoldByRetailer: current.onHoldByRetailer,
+    pricing: current.pricing,
+    countryAvailabilities: current.countryAvailabilities,
+    stock: current.stock,
+    fulfilment: current.fulfilment
+  };
+  return bolRequest('put', `/offers/${offerId}`, { data: payload });
+}
+
 // جلب كل العروض (Offers) بتاعة الحساب - مفيد للمزامنة الأولى
 async function getOffers(page = 1) {
   return bolRequest('get', '/offers', { params: { page } });
@@ -144,6 +178,9 @@ module.exports = {
   getOpenOrders,
   getOrderDetails,
   updateOfferStock,
+  updateOfferPrice,
+  getOfferById,
+  updateOfferReference,
   getOffers,
   requestOfferExport,
   getProcessStatus,
