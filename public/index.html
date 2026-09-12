@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تسجيل الدخول - منصة المخزون</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <h1>منصة إدارة المخزون</h1>
+    <p class="subtitle">مزامنة لحظية مع bol.com</p>
+    <form id="loginForm">
+      <label>اسم المستخدم</label>
+      <input type="text" id="username" required autocomplete="username">
+      <label>كلمة المرور</label>
+      <input type="password" id="password" required autocomplete="current-password">
+      <button type="submit">دخول</button>
+      <p id="errorMsg" class="error-msg"></p>
+    </form>
+  </div>
+
+<script>
+document.getElementById('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const username = document.getElementById('username').value;
+  const password = document.getElementById('password').value;
+  const errorMsg = document.getElementById('errorMsg');
+  errorMsg.textContent = '';
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      errorMsg.textContent = data.error || 'حصل خطأ';
+      return;
+    }
+    window.location.href = '/dashboard.html';
+  } catch (err) {
+    errorMsg.textContent = 'مشكلة في الاتصال بالسيرفر';
+  }
+});
+</script>
+</body>
+</html>
