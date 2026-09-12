@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { runSync } = require('../sync');
+const { importOffersFromBol, startImportJob, getImportJobStatus } = require('../importOffers');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -9,6 +10,17 @@ router.use(requireAuth);
 router.post('/run', async (req, res) => {
   const result = await runSync();
   res.json(result);
+});
+
+// بيبدأ استيراد العروض من bol.com في الخلفية ويرجع فورًا (مش بيستنى لحد ما يخلص)
+router.post('/import-from-bol', (req, res) => {
+  const job = startImportJob();
+  res.json({ ok: true, status: job.status });
+});
+
+// المتصفح بيسأل بالحالة دي كل شوية لحد ما العملية تخلص
+router.get('/import-from-bol/status', (req, res) => {
+  res.json(getImportJobStatus());
 });
 
 router.get('/log', (req, res) => {

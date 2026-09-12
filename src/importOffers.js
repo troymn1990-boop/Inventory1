@@ -78,4 +78,33 @@ async function importOffersFromBol() {
   return { totalRows: rows.length, updated, created, errors };
 }
 
-module.exports = { importOffersFromBol };
+let currentJob = { status: 'idle' };
+
+function getImportJobStatus() {
+  return currentJob;
+}
+
+// بيبدأ الاستيراد في الخلفية من غير ما يخلّي المتصفح مستني رد فوري
+// (عشان نتفادى timeout بتاع الاستضافة لو العملية طالت)
+function startImportJob() {
+  if (currentJob.status === 'running') {
+    return currentJob;
+  }
+  currentJob = { status: 'running', startedAt: new Date().toISOString() };
+
+  importOffersFromBol()
+    .then((result) => {
+      currentJob = { status: 'success', finishedAt: new Date().toISOString(), result };
+    })
+    .catch((e) => {
+      currentJob = {
+        status: 'error',
+        finishedAt: new Date().toISOString(),
+        error: e.response?.data?.detail || e.message
+      };
+    });
+
+  return currentJob;
+}
+
+module.exports = { importOffersFromBol, startImportJob, getImportJobStatus };

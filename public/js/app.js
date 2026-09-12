@@ -220,28 +220,60 @@ async function loadReport() {
 }
 
 // ================= استيراد من bol.com =================
+let importPollInterval = null;
+
 document.getElementById('importFromBolBtn').addEventListener('click', async () => {
   const btn = document.getElementById('importFromBolBtn');
   const statusEl = document.getElementById('importStatus');
   btn.disabled = true;
-  statusEl.textContent = '⏳ جاري السحب من bol.com... ممكن ياخد دقيقة أو دقيقتين، متقفلش الصفحة.';
+  statusEl.textContent = '⏳ جاري بدء الاستيراد...';
 
   try {
     const res = await fetch('/api/sync/import-from-bol', { method: 'POST' });
     const data = await res.json();
     if (!res.ok || !data.ok) {
-      statusEl.textContent = '❌ فشل الاستيراد: ' + (data.error || 'خطأ غير معروف');
-    } else {
-      statusEl.textContent = `✅ تم! إجمالي العروض: ${data.totalRows} | اتحدّث: ${data.updated} | اتضاف جديد: ${data.created}` +
-        (data.errors?.length ? ` | تحذيرات: ${data.errors.length} (شوف الـ console)` : '');
-      if (data.errors?.length) console.warn('تحذيرات الاستيراد:', data.errors);
+      statusEl.textContent = '❌ تعذّر بدء الاستيراد: ' + (data.error || 'خطأ غير معروف');
+      btn.disabled = false;
+      return;
     }
+    statusEl.textContent = '⏳ الاستيراد شغال في الخلفية... ممكن ياخد دقيقة أو دقيقتين، تقدر تفضل مستخدم المنصة عادي.';
+    pollImportStatus();
   } catch (e) {
     statusEl.textContent = '❌ مشكلة في الاتصال بالسيرفر';
-  } finally {
     btn.disabled = false;
   }
 });
+
+function pollImportStatus() {
+  const btn = document.getElementById('importFromBolBtn');
+  const statusEl = document.getElementById('importStatus');
+  if (importPollInterval) clearInterval(importPollInterval);
+
+  importPollInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/api/sync/import-from-bol/status');
+      const job = await res.json();
+
+      if (job.status === 'running') {
+        statusEl.textContent = '⏳ الاستيراد لسه شغال... استنى شوية.';
+      } else if (job.status === 'success') {
+        const r = job.result;
+        statusEl.textContent = `✅ تم! إجمالي العروض: ${r.totalRows} | اتحدّث: ${r.updated} | اتضاف جديد: ${r.created}` +
+          (r.errors?.length ? ` | تحذيرات: ${r.errors.length} (شوف الـ console)` : '');
+        if (r.errors?.length) console.warn('تحذيرات الاستيراد:', r.errors);
+        clearInterval(importPollInterval);
+        btn.disabled = false;
+        loadProducts();
+      } else if (job.status === 'error') {
+        statusEl.textContent = '❌ فشل الاستيراد: ' + job.error;
+        clearInterval(importPollInterval);
+        btn.disabled = false;
+      }
+    } catch (e) {
+      // تجاهل الخطأ ده وحاول تاني في الدورة الجاية
+    }
+  }, 3000);
+}
 
 // ================= المزامنة =================
 document.getElementById('runSyncBtn').addEventListener('click', async () => {
