@@ -1,4 +1,5 @@
-sku,name,ean,bol_offer_id,cost_price,sell_price,stock_qty,category
-SKU-001,سماعة بلوتوث لاسلكية,8712345678901,offer-abc123,15.50,29.99,120,إلكترونيات
-SKU-002,شاحن سريع USB-C,8712345678902,offer-abc124,4.20,9.99,300,إلكترونيات
-SKU-003,حقيبة ظهر رياضية,8712345678903,offer-abc125,12.00,24.50,80,حقائب
+sku,name,cost_price,stock_qty,category,ean,bol_offer_id,reference,sell_price
+HEATER-001,سخان مياه كهربائي 50 لتر,850,40,أجهزة منزلية,8712345678901,offer-abc123,HEATER-001-A,1299.99
+HEATER-001,سخان مياه كهربائي 50 لتر,850,40,أجهزة منزلية,8712345678902,offer-abc124,HEATER-001-B,1349.99
+HEATER-001,سخان مياه كهربائي 50 لتر,850,40,أجهزة منزلية,8712345678903,offer-abc125,HEATER-001-C,1279.50
+SKU-002,شاحن سريع USB-C,4.20,300,إلكترونيات,8712345678904,offer-abc126,SKU-002,9.99

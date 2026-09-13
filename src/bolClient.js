@@ -87,27 +87,23 @@ async function updateOfferPrice(offerId, price) {
   });
 }
 
-// جلب تفاصيل عرض معين - مستخدمة قبل تحديث الـ reference (SKU) عشان منخسرش إعدادات تانية
+// جلب تفاصيل عرض معين - مستخدمة لمعرفة onHoldByRetailer الحالية قبل تحديث الـ reference
 async function getOfferById(offerId) {
   return bolRequest('get', `/offers/${offerId}`);
 }
 
-// تحديث الـ reference (اللي بنستخدمه كـ SKU) لعرض معين
-// ملحوظة: bol.com مش بتديك endpoint يحدّث الـ reference لوحده، فبنجيب العرض
-// الحالي كامل الأول عشان نحافظ على باقي إعداداته (condition, fulfilment...) ونغيّر الـ reference بس
-async function updateOfferReference(offerId, reference) {
-  const current = await getOfferById(offerId);
-  const payload = {
-    ean: current.ean,
-    condition: current.condition,
-    reference: reference,
-    onHoldByRetailer: current.onHoldByRetailer,
-    pricing: current.pricing,
-    countryAvailabilities: current.countryAvailabilities,
-    stock: current.stock,
-    fulfilment: current.fulfilment
-  };
-  return bolRequest('put', `/offers/${offerId}`, { data: payload });
+// تحديث الـ reference (اللي بنستخدمه كـ SKU/EAN reference) لعرض معين
+// endpoint "Update an offer" بيحدّث reference و onHoldByRetailer بس (مش كل بيانات العرض)
+// فمحتاجينش نجيب العرض كامل أو نخاف نمسح economicOperatorId أو أي حاجة تانية
+async function updateOfferReference(offerId, reference, onHoldByRetailer) {
+  let holdValue = onHoldByRetailer;
+  if (holdValue === undefined) {
+    const current = await getOfferById(offerId);
+    holdValue = current.onHoldByRetailer ?? false;
+  }
+  return bolRequest('put', `/offers/${offerId}`, {
+    data: { reference, onHoldByRetailer: holdValue }
+  });
 }
 
 // جلب كل العروض (Offers) بتاعة الحساب - مفيد للمزامنة الأولى

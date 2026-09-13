@@ -35,19 +35,19 @@ async function loadOverview() {
   const { totals, lowStock } = await res.json();
 
   document.getElementById('summaryCards').innerHTML = `
-    <div class="stat-card"><div class="label">عدد الأصناف</div><div class="value">${totals.total_products || 0}</div></div>
+    <div class="stat-card"><div class="label">عدد المنتجات الأساسية</div><div class="value">${totals.total_products || 0}</div></div>
+    <div class="stat-card"><div class="label">عدد EANs المرتبطة</div><div class="value">${totals.total_offers || 0}</div></div>
     <div class="stat-card"><div class="label">إجمالي الوحدات بالمخزون</div><div class="value">${totals.total_units || 0}</div></div>
-    <div class="stat-card"><div class="label">قيمة المخزون (تكلفة)</div><div class="value">${money(totals.inventory_cost_value)}</div></div>
-    <div class="stat-card accent"><div class="label">قيمة المخزون (سعر بيع)</div><div class="value">${money(totals.inventory_retail_value)}</div></div>
+    <div class="stat-card accent"><div class="label">قيمة المخزون (تكلفة)</div><div class="value">${money(totals.inventory_cost_value)}</div></div>
   `;
 
   const tbody = document.querySelector('#lowStockTable tbody');
   tbody.innerHTML = lowStock.length
     ? lowStock.map(p => `<tr><td>${p.sku}</td><td>${p.name}</td><td>${p.stock_qty}</td><td>${p.low_stock_threshold}</td></tr>`).join('')
-    : '<tr><td colspan="4">مفيش أصناف ناقصة دلوقتي 🎉</td></tr>';
+    : '<tr><td colspan="4">مفيش منتجات ناقصة دلوقتي 🎉</td></tr>';
 }
 
-// ================= المخزون =================
+// ================= المنتجات (الشجرة) =================
 let productsState = { page: 1, pageSize: 50, search: '', lowStockOnly: false };
 
 async function loadProducts() {
@@ -65,18 +65,17 @@ async function loadProducts() {
     <tr class="${p.stock_qty <= p.low_stock_threshold ? 'low-stock-row' : ''}">
       <td>${p.sku}</td>
       <td>${p.name}</td>
-      <td>${p.ean || '-'}</td>
-      <td>${p.bol_offer_id || '-'}</td>
       <td>${money(p.cost_price)}</td>
-      <td>${money(p.sell_price)}</td>
       <td>${p.stock_qty}</td>
+      <td><span class="badge">${p.offers_count} EAN</span></td>
       <td>
+        <button class="icon-btn" onclick="openOffersModal(${p.id}, '${p.sku.replace(/'/g, "\\'")}')" title="إدارة الـ EANs المرتبطة">🔗</button>
         <button class="icon-btn" onclick="syncProductToBol(${p.id})" title="مزامنة مع bol.com">🔄</button>
         <button class="icon-btn" onclick="editProduct(${p.id})">✏️</button>
         <button class="icon-btn" onclick="deleteProduct(${p.id})">🗑️</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="8">مفيش نتائج</td></tr>';
+  `).join('') || '<tr><td colspan="6">مفيش نتائج</td></tr>';
 
   const totalPages = Math.max(1, Math.ceil(data.total / productsState.pageSize));
   const pag = document.getElementById('pagination');
@@ -107,7 +106,141 @@ document.getElementById('lowStockFilter').addEventListener('change', (e) => {
   loadProducts();
 });
 
-// ---- مزامنة فردية مع bol.com ----
+// ---- Modal إضافة/تعديل منتج أساسي ----
+const modal = document.getElementById('productModal');
+document.getElementById('addProductBtn').addEventListener('click', () => openModal());
+document.getElementById('cancelModalBtn').addEventListener('click', () => modal.classList.add('hidden'));
+
+function openModal(product = null) {
+  document.getElementById('modalTitle').textContent = product ? 'تعديل المنتج الأساسي' : 'إضافة منتج أساسي جديد';
+  document.getElementById('productId').value = product?.id || '';
+  document.getElementById('f_sku').value = product?.sku || '';
+  document.getElementById('f_sku').disabled = !!product;
+  document.getElementById('f_name').value = product?.name || '';
+  document.getElementById('f_cost').value = product?.cost_price ?? '';
+  document.getElementById('f_stock').value = product?.stock_qty ?? '';
+  document.getElementById('f_threshold').value = product?.low_stock_threshold ?? 5;
+  modal.classList.remove('hidden');
+}
+
+let allProductsCache = [];
+window.editProduct = async (id) => {
+  const res = await fetch('/api/products?search=&page=1&pageSize=1000');
+  const data = await res.json();
+  allProductsCache = data.products;
+  const product = data.products.find(p => p.id === id);
+  if (product) openModal(product);
+};
+
+window.deleteProduct = async (id) => {
+  if (!confirm('متأكد إنك عايز تمسح المنتج الأساسي ده؟ هيتمسح معاه كل الـ EANs المرتبطة بيه.')) return;
+  await fetch('/api/products/' + id, { method: 'DELETE' });
+  loadProducts();
+};
+
+document.getElementById('productForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('productId').value;
+  const body = {
+    sku: document.getElementById('f_sku').value,
+    name: document.getElementById('f_name').value,
+    cost_price: document.getElementById('f_cost').value,
+    stock_qty: document.getElementById('f_stock').value,
+    low_stock_threshold: document.getElementById('f_threshold').value
+  };
+
+  const url = id ? '/api/products/' + id : '/api/products';
+  const method = id ? 'PUT' : 'POST';
+  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'حصل خطأ'); return; }
+
+  modal.classList.add('hidden');
+  loadProducts();
+});
+
+// ---- Modal إدارة الـ EANs المرتبطة بمنتج ----
+const offersModal = document.getElementById('offersModal');
+let currentOffersProductId = null;
+
+window.openOffersModal = async (productId, sku) => {
+  currentOffersProductId = productId;
+  document.getElementById('offersModalTitle').textContent = `EANs المرتبطة بـ ${sku}`;
+  await loadOffers();
+  offersModal.classList.remove('hidden');
+};
+
+document.getElementById('closeOffersModalBtn').addEventListener('click', () => {
+  offersModal.classList.add('hidden');
+  loadProducts(); // نحدّث عدد الـ EANs في الجدول بعد القفل
+});
+
+async function loadOffers() {
+  const res = await fetch(`/api/products/${currentOffersProductId}/offers`);
+  const { offers } = await res.json();
+  document.querySelector('#offersTable tbody').innerHTML = offers.map(o => `
+    <tr>
+      <td><input type="text" value="${o.ean || ''}" onchange="updateOfferField(${o.id}, 'ean', this.value)" style="width:110px"></td>
+      <td><input type="text" value="${o.bol_offer_id || ''}" onchange="updateOfferField(${o.id}, 'bol_offer_id', this.value)" style="width:110px"></td>
+      <td><input type="text" value="${o.reference || ''}" onchange="updateOfferField(${o.id}, 'reference', this.value)" style="width:100px"></td>
+      <td><input type="number" step="0.01" value="${o.sell_price}" onchange="updateOfferField(${o.id}, 'sell_price', this.value)" style="width:80px"></td>
+      <td><button class="icon-btn" onclick="deleteOffer(${o.id})">🗑️</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="5">مفيش EANs مرتبطة لسه - ضيف واحد تحت</td></tr>';
+}
+
+window.updateOfferField = async (offerId, field, value) => {
+  await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ [field]: value })
+  });
+};
+
+window.deleteOffer = async (offerId) => {
+  if (!confirm('متأكد إنك عايز تفك ربط الـ EAN ده؟')) return;
+  await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}`, { method: 'DELETE' });
+  loadOffers();
+};
+
+document.getElementById('offerForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = {
+    ean: document.getElementById('o_ean').value,
+    bol_offer_id: document.getElementById('o_offer').value,
+    reference: document.getElementById('o_reference').value,
+    sell_price: document.getElementById('o_price').value
+  };
+  const res = await fetch(`/api/products/${currentOffersProductId}/offers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'حصل خطأ'); return; }
+  e.target.reset();
+  loadOffers();
+});
+
+// ---- استيراد CSV ----
+document.getElementById('csvInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch('/api/products/import', { method: 'POST', body: formData });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'فشل الاستيراد'); return; }
+  alert(
+    `تم! منتجات جديدة: ${data.productsCreated} | منتجات اتحدّثت: ${data.productsUpdated} | EANs جديدة: ${data.offersCreated} | EANs اتحدّثت: ${data.offersUpdated}` +
+    (data.errors?.length ? `\nتحذيرات: ${data.errors.length} (شوف الـ console)` : '')
+  );
+  if (data.errors?.length) console.warn('تحذيرات الاستيراد:', data.errors);
+  loadProducts();
+  e.target.value = '';
+});
+
+// ---- مزامنة فردية مع bol.com (بتبعت لكل الـ EANs المرتبطة بالمنتج) ----
 window.syncProductToBol = async (id) => {
   try {
     const res = await fetch(`/api/products/${id}/push-to-bol`, { method: 'POST' });
@@ -116,9 +249,12 @@ window.syncProductToBol = async (id) => {
       alert('فشلت المزامنة: ' + (data.error || 'خطأ غير معروف'));
       return;
     }
-    const lines = Object.entries(data.result).map(([k, v]) => {
-      const label = k === 'price' ? 'السعر' : k === 'stock' ? 'المخزون' : 'الـ SKU';
-      return `${label}: ${v}`;
+    const lines = data.results.map(r => {
+      const parts = [`EAN ${r.ean || '?'}:`];
+      if (r.price) parts.push('السعر ' + r.price);
+      if (r.stock) parts.push('المخزون ' + r.stock);
+      if (r.sku) parts.push('SKU ' + r.sku);
+      return parts.join(' | ');
     });
     alert('نتيجة المزامنة:\n' + lines.join('\n'));
   } catch (e) {
@@ -179,77 +315,6 @@ function pollPushAllStatus() {
     }
   }, 3000);
 }
-
-// ---- Modal إضافة/تعديل ----
-const modal = document.getElementById('productModal');
-document.getElementById('addProductBtn').addEventListener('click', () => openModal());
-document.getElementById('cancelModalBtn').addEventListener('click', () => modal.classList.add('hidden'));
-
-function openModal(product = null) {
-  document.getElementById('modalTitle').textContent = product ? 'تعديل صنف' : 'إضافة صنف جديد';
-  document.getElementById('productId').value = product?.id || '';
-  document.getElementById('f_sku').value = product?.sku || '';
-  document.getElementById('f_sku').disabled = !!product;
-  document.getElementById('f_name').value = product?.name || '';
-  document.getElementById('f_ean').value = product?.ean || '';
-  document.getElementById('f_offer').value = product?.bol_offer_id || '';
-  document.getElementById('f_cost').value = product?.cost_price ?? '';
-  document.getElementById('f_sell').value = product?.sell_price ?? '';
-  document.getElementById('f_stock').value = product?.stock_qty ?? '';
-  document.getElementById('f_threshold').value = product?.low_stock_threshold ?? 5;
-  modal.classList.remove('hidden');
-}
-
-window.editProduct = async (id) => {
-  const res = await fetch('/api/products?search=&page=1&pageSize=1000');
-  const data = await res.json();
-  const product = data.products.find(p => p.id === id);
-  if (product) openModal(product);
-};
-
-window.deleteProduct = async (id) => {
-  if (!confirm('متأكد إنك عايز تمسح الصنف ده؟')) return;
-  await fetch('/api/products/' + id, { method: 'DELETE' });
-  loadProducts();
-};
-
-document.getElementById('productForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const id = document.getElementById('productId').value;
-  const body = {
-    sku: document.getElementById('f_sku').value,
-    name: document.getElementById('f_name').value,
-    ean: document.getElementById('f_ean').value,
-    bol_offer_id: document.getElementById('f_offer').value,
-    cost_price: document.getElementById('f_cost').value,
-    sell_price: document.getElementById('f_sell').value,
-    stock_qty: document.getElementById('f_stock').value,
-    low_stock_threshold: document.getElementById('f_threshold').value
-  };
-
-  const url = id ? '/api/products/' + id : '/api/products';
-  const method = id ? 'PUT' : 'POST';
-  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const data = await res.json();
-  if (!res.ok) { alert(data.error || 'حصل خطأ'); return; }
-
-  modal.classList.add('hidden');
-  loadProducts();
-});
-
-// ---- استيراد CSV ----
-document.getElementById('csvInput').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const formData = new FormData();
-  formData.append('file', file);
-  const res = await fetch('/api/products/import', { method: 'POST', body: formData });
-  const data = await res.json();
-  if (!res.ok) { alert(data.error || 'فشل الاستيراد'); return; }
-  alert(`تم استيراد ${data.imported} من ${data.total} صنف بنجاح`);
-  loadProducts();
-  e.target.value = '';
-});
 
 // ================= التقارير =================
 let profitChartInstance = null;
@@ -332,7 +397,9 @@ function pollImportStatus() {
         statusEl.textContent = '⏳ الاستيراد لسه شغال... استنى شوية.';
       } else if (job.status === 'success') {
         const r = job.result;
-        statusEl.textContent = `✅ تم! إجمالي العروض: ${r.totalRows} | اتحدّث: ${r.updated} | اتضاف جديد: ${r.created}` +
+        statusEl.textContent =
+          `✅ تم! إجمالي العروض: ${r.totalRows} | اتحدّث: ${r.offersUpdated} | ` +
+          `EANs اتضافت لمنتجات موجودة: ${r.offersAddedToExisting} | منتجات جديدة اتعملت: ${r.productsCreated}` +
           (r.errors?.length ? ` | تحذيرات: ${r.errors.length} (شوف الـ console)` : '');
         if (r.errors?.length) console.warn('تحذيرات الاستيراد:', r.errors);
         clearInterval(importPollInterval);

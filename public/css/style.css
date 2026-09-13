@@ -121,6 +121,10 @@ tr:hover td { background: #fafaf5; }
 }
 .modal.hidden { display: none; }
 .modal-box { background: white; border-radius: 12px; padding: 24px; width: 380px; max-height: 90vh; overflow-y: auto; }
+.modal-box.offers-modal-box { width: 560px; }
+.offers-modal-box table { margin-bottom: 16px; }
+.offers-modal-box h4 { margin-bottom: 4px; color: var(--primary-dark); font-size: 14px; }
+.badge { display: inline-block; background: #eef3f0; color: var(--primary-dark); border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 700; }
 .modal-box h3 { margin-top: 0; color: var(--primary-dark); }
 .modal-box form { display: flex; flex-direction: column; }
 .modal-box label { font-size: 13px; color: var(--muted); margin-top: 10px; }

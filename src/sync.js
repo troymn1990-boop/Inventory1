@@ -6,8 +6,9 @@ let isSyncing = false;
 /**
  * خطوات المزامنة:
  * 1. نجيب الطلبات المفتوحة من bol.com
- * 2. أي عنصر أوردر لسه ما تسجلش عندنا (bol_order_item_id) -> ننزّل المخزون المحلي ونسجل عملية بيع
- * 3. أي منتج اتغيّر مخزونه محليًا (يدويًا أو من البيع) ومعاه bol_offer_id -> نبعت تحديث المخزون لـ bol.com
+ * 2. أي عنصر أوردر لسه ما تسجلش عندنا -> نلاقي الـ EAN في جدول العروض، نعرف المنتج الأساسي بتاعه،
+ *    وننزّل من المخزون المشترك للمنتج ده (مش من العرض نفسه)
+ * 3. أي منتج اتغيّر مخزونه -> نبعت المخزون الجديد لكل الـ EANs المرتبطة بيه على bol.com
  */
 async function runSync() {
   if (isSyncing) {
@@ -20,7 +21,6 @@ async function runSync() {
   const errors = [];
 
   try {
-    // 1) جلب الطلبات المفتوحة ومعالجتها
     let ordersData;
     try {
       ordersData = await bol.getOpenOrders();
@@ -47,16 +47,22 @@ async function runSync() {
             .get(orderItemId);
           if (alreadyRecorded) continue;
 
-          const product = db.prepare('SELECT * FROM products WHERE ean = ?').get(ean);
+          const offer = db.prepare('SELECT * FROM product_offers WHERE ean = ?').get(ean);
+          if (!offer) {
+            errors.push(`EAN ${ean} من أوردر bol.com مش مربوط بأي منتج عندك - اتجاهل`);
+            continue;
+          }
+
+          const product = db.prepare('SELECT * FROM products WHERE id = ?').get(offer.product_id);
           if (!product) {
-            errors.push(`منتج بالباركود ${ean} من أوردر bol.com مش موجود في المخزون - اتجاهله`);
+            errors.push(`المنتج الأساسي بتاع EAN ${ean} مش موجود - اتجاهل`);
             continue;
           }
 
           db.prepare(
-            `INSERT INTO sales (product_id, bol_order_id, bol_order_item_id, quantity, sale_price, cost_price, source)
-             VALUES (?, ?, ?, ?, ?, ?, 'bol')`
-          ).run(product.id, orderSummary.orderId, orderItemId, quantity, unitPrice, product.cost_price);
+            `INSERT INTO sales (product_id, offer_id, bol_order_id, bol_order_item_id, quantity, sale_price, cost_price, source)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'bol')`
+          ).run(product.id, offer.id, orderSummary.orderId, orderItemId, quantity, unitPrice, product.cost_price);
 
           const newStock = Math.max(0, product.stock_qty - quantity);
           db.prepare('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
@@ -71,17 +77,29 @@ async function runSync() {
       }
     }
 
-    // 2) دفع تحديثات المخزون لـ bol.com لكل المنتجات اللي ليها offer_id
+    // دفع المخزون المحدّث لكل الـ EANs المرتبطة بأي منتج نشط
     const productsToPush = db
-      .prepare('SELECT * FROM products WHERE bol_offer_id IS NOT NULL AND bol_offer_id != \'\' AND active = 1')
+      .prepare(
+        `SELECT DISTINCT p.* FROM products p
+         JOIN product_offers o ON o.product_id = p.id
+         WHERE o.bol_offer_id IS NOT NULL AND o.bol_offer_id != '' AND o.active = 1 AND p.active = 1`
+      )
       .all();
 
     for (const product of productsToPush) {
-      try {
-        await bol.updateOfferStock(product.bol_offer_id, product.stock_qty);
-        stockPushed++;
-      } catch (e) {
-        errors.push(`فشل تحديث مخزون ${product.sku} على bol.com: ${e.response?.data?.detail || e.message}`);
+      const offers = db
+        .prepare(
+          `SELECT * FROM product_offers WHERE product_id = ? AND bol_offer_id IS NOT NULL AND bol_offer_id != '' AND active = 1`
+        )
+        .all(product.id);
+
+      for (const offer of offers) {
+        try {
+          await bol.updateOfferStock(offer.bol_offer_id, product.stock_qty);
+          stockPushed++;
+        } catch (e) {
+          errors.push(`فشل تحديث مخزون ${product.sku} (EAN: ${offer.ean}) على bol.com: ${e.response?.data?.detail || e.message}`);
+        }
       }
     }
 

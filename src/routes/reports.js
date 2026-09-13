@@ -13,7 +13,7 @@ router.get('/inventory-summary', (req, res) => {
         COUNT(*) as total_products,
         SUM(stock_qty) as total_units,
         SUM(stock_qty * cost_price) as inventory_cost_value,
-        SUM(stock_qty * sell_price) as inventory_retail_value
+        (SELECT COUNT(*) FROM product_offers WHERE active = 1) as total_offers
        FROM products WHERE active = 1`
     )
     .get();
@@ -75,16 +75,19 @@ router.get('/profit', (req, res) => {
   res.json({ summary, byProduct, byDay });
 });
 
-// تسجيل عملية بيع يدوية (مش من bol.com)
+// تسجيل عملية بيع يدوية (مش من bol.com) - لازم تحدد سعر البيع لأن السعر بقى مرتبط بكل EAN مش بالمنتج نفسه
 router.post('/manual-sale', (req, res) => {
   const { product_id, quantity, sale_price } = req.body;
+  if (sale_price === undefined || sale_price === null) {
+    return res.status(400).json({ error: 'سعر البيع مطلوب' });
+  }
   const product = db.prepare('SELECT * FROM products WHERE id = ?').get(product_id);
   if (!product) return res.status(404).json({ error: 'المنتج مش موجود' });
   if (product.stock_qty < quantity) return res.status(400).json({ error: 'الكمية في المخزون مش كفاية' });
 
   db.prepare(
     `INSERT INTO sales (product_id, quantity, sale_price, cost_price, source) VALUES (?, ?, ?, ?, 'manual')`
-  ).run(product_id, quantity, sale_price ?? product.sell_price, product.cost_price);
+  ).run(product_id, quantity, sale_price, product.cost_price);
 
   db.prepare('UPDATE products SET stock_qty = stock_qty - ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
     quantity,

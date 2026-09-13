@@ -3,9 +3,12 @@ const db = require('./db');
 const bol = require('./bolClient');
 
 /**
- * بيسحب كل العروض بتاعتك من bol.com ويطابقها مع المخزون المحلي:
- * - لو لقى منتج بنفس الـ EAN أو نفس الـ SKU (referenceCode) -> يحدّث سعر البيع والمخزون و Offer ID
- * - لو مفيش تطابق -> يضيف صنف جديد (باسم مؤقت، لأن bol.com مبيرجعش اسم المنتج في ملف التصدير)
+ * بيسحب كل عروضك من bol.com ويحطها في النظام:
+ * - لو الـ EAN موجود عندك بالفعل كعرض مرتبط بمنتج -> يحدّث السعر والـ Offer ID بس (مبيلمسش المخزون المحلي)
+ * - لو الـ EAN جديد كليًا بس الـ SKU (referenceCode) بتاعه بيطابق منتج أساسي عندك -> بيضيفه كـ EAN جديد على نفس المنتج (تجميع تلقائي للشجرة)
+ * - لو مفيش تطابق خالص -> بيعمل منتج أساسي جديد مستقل بيه EAN واحد (وتقدر تدموجه يدويًا مع منتج تاني بعدين)
+ *
+ * ملحوظة: bol.com مبيرجعش اسم المنتج في ملف التصدير، فالمنتجات الجديدة بتتضاف باسم مؤقت.
  */
 async function importOffersFromBol() {
   const exportRequest = await bol.requestOfferExport();
@@ -19,20 +22,21 @@ async function importOffersFromBol() {
 
   const rows = parse(csvText, { columns: true, skip_empty_lines: true, trim: true });
 
-  let updated = 0;
-  let created = 0;
+  let offersUpdated = 0;
+  let offersAddedToExisting = 0;
+  let productsCreated = 0;
   const errors = [];
 
-  const findByEan = db.prepare('SELECT * FROM products WHERE ean = ?');
-  const findBySku = db.prepare('SELECT * FROM products WHERE sku = ?');
-  const updateStmt = db.prepare(
-    `UPDATE products SET
-      ean = ?, bol_offer_id = ?, sell_price = ?, stock_qty = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ?`
+  const findOfferByEan = db.prepare('SELECT * FROM product_offers WHERE ean = ?');
+  const findProductBySku = db.prepare('SELECT * FROM products WHERE sku = ?');
+  const updateOfferStmt = db.prepare(
+    `UPDATE product_offers SET bol_offer_id = ?, sell_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
   );
-  const insertStmt = db.prepare(
-    `INSERT INTO products (sku, ean, bol_offer_id, name, cost_price, sell_price, stock_qty)
-     VALUES (?, ?, ?, ?, 0, ?, ?)`
+  const insertOfferStmt = db.prepare(
+    `INSERT INTO product_offers (product_id, ean, bol_offer_id, reference, sell_price) VALUES (?, ?, ?, ?, ?)`
+  );
+  const insertProductStmt = db.prepare(
+    `INSERT INTO products (sku, name, cost_price, stock_qty) VALUES (?, ?, 0, ?)`
   );
 
   const tx = db.transaction((offerRows) => {
@@ -44,27 +48,33 @@ async function importOffersFromBol() {
         const sellPrice = parseFloat(row.bundlePricesPrice) || 0;
         const stockQty = parseInt(row.stockAmount, 10) || 0;
 
-        if (!ean && !sku) {
-          errors.push(`صف من غير EAN ولا SKU اتجاهل (offerId: ${offerId})`);
+        if (!ean) {
+          errors.push(`صف من غير EAN اتجاهل (offerId: ${offerId})`);
           continue;
         }
 
-        let existing = null;
-        if (ean) existing = findByEan.get(ean);
-        if (!existing && sku) existing = findBySku.get(sku);
+        const existingOffer = findOfferByEan.get(ean);
+        if (existingOffer) {
+          updateOfferStmt.run(offerId, sellPrice, existingOffer.id);
+          offersUpdated++;
+          continue;
+        }
 
-        if (existing) {
-          updateStmt.run(ean || existing.ean, offerId, sellPrice, stockQty, existing.id);
-          updated++;
+        // مفيش عرض بنفس الـ EAN - نشوف هل الـ SKU بتاعه بيطابق منتج أساسي موجود
+        let product = sku ? findProductBySku.get(sku) : null;
+
+        if (product) {
+          insertOfferStmt.run(product.id, ean, offerId, sku, sellPrice);
+          offersAddedToExisting++;
         } else {
-          // مفيش اسم متاح من bol.com في ملف التصدير - بنحط اسم مؤقت لحد ما تعدّله
-          const tempName = `(بدون اسم - عدّله) ${sku || ean}`;
           const finalSku = sku || `bol-${ean}`;
+          const tempName = `(بدون اسم - عدّله) ${sku || ean}`;
           try {
-            insertStmt.run(finalSku, ean || null, offerId, tempName, sellPrice, stockQty);
-            created++;
+            const info = insertProductStmt.run(finalSku, tempName, stockQty);
+            insertOfferStmt.run(info.lastInsertRowid, ean, offerId, sku, sellPrice);
+            productsCreated++;
           } catch (e) {
-            errors.push(`فشل إضافة صنف جديد (SKU: ${finalSku}): ${e.message}`);
+            errors.push(`فشل إضافة منتج جديد (SKU: ${finalSku}): ${e.message}`);
           }
         }
       } catch (e) {
@@ -75,7 +85,7 @@ async function importOffersFromBol() {
 
   tx(rows);
 
-  return { totalRows: rows.length, updated, created, errors };
+  return { totalRows: rows.length, offersUpdated, offersAddedToExisting, productsCreated, errors };
 }
 
 let currentJob = { status: 'idle' };
@@ -84,8 +94,6 @@ function getImportJobStatus() {
   return currentJob;
 }
 
-// بيبدأ الاستيراد في الخلفية من غير ما يخلّي المتصفح مستني رد فوري
-// (عشان نتفادى timeout بتاع الاستضافة لو العملية طالت)
 function startImportJob() {
   if (currentJob.status === 'running') {
     return currentJob;
