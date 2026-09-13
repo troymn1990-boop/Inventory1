@@ -86,36 +86,53 @@ router.delete('/:id', (req, res) => {
 
 router.get('/:id/offers', (req, res) => {
   const offers = db
-    .prepare('SELECT * FROM product_offers WHERE product_id = ? ORDER BY id ASC')
+    .prepare(
+      `SELECT o.*, a.name as account_name
+       FROM product_offers o
+       LEFT JOIN bol_accounts a ON a.id = o.account_id
+       WHERE o.product_id = ? ORDER BY o.id ASC`
+    )
     .all(req.params.id);
   res.json({ offers });
 });
 
 router.post('/:id/offers', (req, res) => {
-  const { ean, bol_offer_id, reference, sell_price } = req.body;
+  const { ean, bol_offer_id, reference, sell_price, account_id } = req.body;
   const product = db.prepare('SELECT id FROM products WHERE id = ?').get(req.params.id);
   if (!product) return res.status(404).json({ error: 'المنتج الأساسي مش موجود' });
 
   const info = db
     .prepare(
-      `INSERT INTO product_offers (product_id, ean, bol_offer_id, reference, sell_price)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO product_offers (product_id, account_id, ean, bol_offer_id, reference, sell_price)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
-    .run(req.params.id, ean || null, bol_offer_id || null, reference || null, Number(sell_price) || 0);
+    .run(req.params.id, account_id || null, ean || null, bol_offer_id || null, reference || null, Number(sell_price) || 0);
 
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 
 router.put('/:id/offers/:offerId', (req, res) => {
-  const { ean, bol_offer_id, reference, sell_price, active } = req.body;
+  const current = db.prepare('SELECT * FROM product_offers WHERE id = ? AND product_id = ?').get(req.params.offerId, req.params.id);
+  if (!current) return res.status(404).json({ error: 'الـ EAN مش موجود' });
+
+  const { ean, bol_offer_id, reference, sell_price, active, account_id } = req.body;
   db.prepare(
     `UPDATE product_offers SET
-      ean = ?, bol_offer_id = ?, reference = ?,
+      ean = ?, bol_offer_id = ?, reference = ?, account_id = ?,
       sell_price = COALESCE(?, sell_price),
       active = COALESCE(?, active),
       updated_at = CURRENT_TIMESTAMP
      WHERE id = ? AND product_id = ?`
-  ).run(ean || null, bol_offer_id || null, reference || null, sell_price, active, req.params.offerId, req.params.id);
+  ).run(
+    ean !== undefined ? ean || null : current.ean,
+    bol_offer_id !== undefined ? bol_offer_id || null : current.bol_offer_id,
+    reference !== undefined ? reference || null : current.reference,
+    account_id !== undefined ? account_id || null : current.account_id,
+    sell_price,
+    active,
+    req.params.offerId,
+    req.params.id
+  );
   res.json({ ok: true });
 });
 
@@ -149,8 +166,9 @@ router.get('/push-all-to-bol/status', (req, res) => {
 });
 
 // ================= استيراد CSV جماعي بنظام الشجرة =================
-// أعمدة متوقعة: sku,name,cost_price,stock_qty,category,ean,bol_offer_id,reference,sell_price
+// أعمدة متوقعة: sku,name,cost_price,stock_qty,category,ean,bol_offer_id,reference,sell_price,account_id
 // ممكن تكرر نفس sku في أكتر من صف عشان تضيف أكتر من EAN لنفس المنتج
+// account_id (اختياري): رقم حساب bol.com من تاب "حسابات bol.com" - لو فاضي، الـ EAN بيتضاف من غير ما يتربط بحساب
 router.post('/import', upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'مفيش ملف' });
 
@@ -170,10 +188,10 @@ router.post('/import', upload.single('file'), (req, res) => {
   );
   const findOfferByEan = db.prepare('SELECT * FROM product_offers WHERE product_id = ? AND ean = ?');
   const insertOffer = db.prepare(
-    `INSERT INTO product_offers (product_id, ean, bol_offer_id, reference, sell_price) VALUES (?, ?, ?, ?, ?)`
+    `INSERT INTO product_offers (product_id, account_id, ean, bol_offer_id, reference, sell_price) VALUES (?, ?, ?, ?, ?, ?)`
   );
   const updateOffer = db.prepare(
-    `UPDATE product_offers SET bol_offer_id = ?, reference = ?, sell_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    `UPDATE product_offers SET bol_offer_id = ?, reference = ?, sell_price = ?, account_id = COALESCE(?, account_id), updated_at = CURRENT_TIMESTAMP WHERE id = ?`
   );
 
   let productsCreated = 0;
@@ -213,18 +231,21 @@ router.post('/import', upload.single('file'), (req, res) => {
 
       // لو الصف فيه بيانات EAN، نضيفه أو نحدّثه كعرض مرتبط بالمنتج ده
       if (row.ean) {
+        const accountId = row.account_id ? Number(row.account_id) : null;
         const existingOffer = findOfferByEan.get(product.id, row.ean);
         if (existingOffer) {
           updateOffer.run(
             row.bol_offer_id || existingOffer.bol_offer_id,
             row.reference || existingOffer.reference,
             Number(row.sell_price) || existingOffer.sell_price,
+            accountId,
             existingOffer.id
           );
           offersUpdated++;
         } else {
           insertOffer.run(
             product.id,
+            accountId,
             row.ean,
             row.bol_offer_id || null,
             row.reference || row.sku,

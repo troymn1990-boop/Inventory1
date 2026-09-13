@@ -38,9 +38,19 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS bol_accounts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  client_secret TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS product_offers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   product_id INTEGER NOT NULL,
+  account_id INTEGER,                   -- أي حساب bol.com العرض ده تابع له
   ean TEXT,
   bol_offer_id TEXT,
   reference TEXT,                       -- الـ SKU/reference الظاهر على bol.com للعرض ده تحديدًا
@@ -48,7 +58,8 @@ CREATE TABLE IF NOT EXISTS product_offers (
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+  FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+  FOREIGN KEY (account_id) REFERENCES bol_accounts(id)
 );
 
 CREATE TABLE IF NOT EXISTS sales (
@@ -110,6 +121,35 @@ function migrateLegacyOffersIfNeeded() {
   console.log(`[ترحيل] تم نقل ${legacyProducts.length} عرض من التصميم القديم لجدول product_offers`);
 }
 migrateLegacyOffersIfNeeded();
+
+// ---------- ترحيل: إضافة عمود account_id لو كان الجدول موجود من قبل بدونه ----------
+function migrateAccountIdColumnIfNeeded() {
+  const columns = db.prepare("PRAGMA table_info(product_offers)").all().map((c) => c.name);
+  if (!columns.includes('account_id')) {
+    db.exec('ALTER TABLE product_offers ADD COLUMN account_id INTEGER REFERENCES bol_accounts(id)');
+    console.log('[ترحيل] تم إضافة عمود account_id لجدول product_offers');
+  }
+}
+migrateAccountIdColumnIfNeeded();
+
+// ---------- ترحيل: لو فيه حساب bol.com قديم متسجل في متغيرات البيئة، نحوّله لحساب في الجدول ----------
+function ensureDefaultAccountFromEnv() {
+  const clientId = process.env.BOL_CLIENT_ID;
+  const clientSecret = process.env.BOL_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return;
+
+  const existingCount = db.prepare('SELECT COUNT(*) as c FROM bol_accounts').get().c;
+  if (existingCount > 0) return; // فيه حسابات متسجلة بالفعل، متعملش حاجة
+
+  const info = db
+    .prepare('INSERT INTO bol_accounts (name, client_id, client_secret) VALUES (?, ?, ?)')
+    .run('الحساب الرئيسي', clientId, clientSecret);
+
+  // أي عرض قديم من غير حساب محدد، بنربطه بالحساب الافتراضي ده
+  db.prepare('UPDATE product_offers SET account_id = ? WHERE account_id IS NULL').run(info.lastInsertRowid);
+  console.log('[ترحيل] تم إنشاء حساب bol.com افتراضي من متغيرات البيئة وربط العروض القديمة بيه');
+}
+ensureDefaultAccountFromEnv();
 
 // إنشاء يوزر أدمن افتراضي أول مرة بس (من ENV)
 function ensureAdminUser() {

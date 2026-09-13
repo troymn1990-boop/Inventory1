@@ -2,6 +2,9 @@
  * عميل الاتصال بـ bol.com Retailer API
  * التوثيق الرسمي: https://api.bol.com/retailer/public/Retailer-API/
  *
+ * كل دالة هنا بتاخد "account" كأول باراميتر - كائن فيه client_id و client_secret
+ * (بييجي من جدول bol_accounts) - عشان نقدر نتعامل مع أكتر من حساب bol.com في نفس الوقت.
+ *
  * ملحوظة مهمة: bol.com بتحدّث نسخة الـ API بين وقت وتاني (v10, v11...).
  * لو حصل خطأ 406/415 من الـ API، افتح رابط التوثيق فوق وحدّث قيمة API_VERSION تحت.
  */
@@ -12,22 +15,21 @@ const BASE_URL = 'https://api.bol.com/retailer';
 const SHARED_BASE_URL = 'https://api.bol.com/shared'; // مسار process-status مختلف عن باقي الـ retailer endpoints
 const API_VERSION = process.env.BOL_API_VERSION || 'v10';
 
-let cachedToken = null;
-let tokenExpiresAt = 0;
+// كاش توكنات لكل حساب لوحده (مفتاح الماب هو id الحساب)
+const tokenCache = new Map(); // accountId -> { token, expiresAt }
 
-async function getAccessToken() {
+async function getAccessToken(account) {
+  if (!account?.client_id || !account?.client_secret) {
+    throw new Error('بيانات الاتصال بـ bol.com (Client ID/Secret) ناقصة لهذا الحساب');
+  }
+
   const now = Date.now();
-  if (cachedToken && now < tokenExpiresAt - 15000) {
-    return cachedToken;
+  const cached = tokenCache.get(account.id);
+  if (cached && now < cached.expiresAt - 15000) {
+    return cached.token;
   }
 
-  const clientId = process.env.BOL_CLIENT_ID;
-  const clientSecret = process.env.BOL_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    throw new Error('BOL_CLIENT_ID أو BOL_CLIENT_SECRET مش متحددين في متغيرات البيئة');
-  }
-
-  const basicAuth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+  const basicAuth = Buffer.from(`${account.client_id}:${account.client_secret}`).toString('base64');
   const res = await axios.post(TOKEN_URL, null, {
     headers: {
       Authorization: `Basic ${basicAuth}`,
@@ -35,13 +37,14 @@ async function getAccessToken() {
     }
   });
 
-  cachedToken = res.data.access_token;
-  tokenExpiresAt = now + (res.data.expires_in || 299) * 1000;
-  return cachedToken;
+  const token = res.data.access_token;
+  const expiresAt = now + (res.data.expires_in || 299) * 1000;
+  tokenCache.set(account.id, { token, expiresAt });
+  return token;
 }
 
-async function bolRequest(method, path, { params, data, accept } = {}) {
-  const token = await getAccessToken();
+async function bolRequest(account, method, path, { params, data, accept } = {}) {
+  const token = await getAccessToken(account);
   const res = await axios({
     method,
     url: `${BASE_URL}${path}`,
@@ -56,19 +59,19 @@ async function bolRequest(method, path, { params, data, accept } = {}) {
   return res.data;
 }
 
-// جلب الطلبات المفتوحة (اللي لسه محتاجة شحن) - المصدر الأساسي لتحديث المخزون
-async function getOpenOrders() {
-  return bolRequest('get', '/orders', { params: { status: 'OPEN', page: 1 } });
+// جلب الطلبات المفتوحة (اللي لسه محتاجة شحن) لحساب معين
+async function getOpenOrders(account) {
+  return bolRequest(account, 'get', '/orders', { params: { status: 'OPEN', page: 1 } });
 }
 
 // جلب تفاصيل أوردر معين (بيحتوي على المنتجات والكميات)
-async function getOrderDetails(orderId) {
-  return bolRequest('get', `/orders/${orderId}`);
+async function getOrderDetails(account, orderId) {
+  return bolRequest(account, 'get', `/orders/${orderId}`);
 }
 
 // تحديث المخزون لعرض (offer) معين على bol.com
-async function updateOfferStock(offerId, stockQty) {
-  return bolRequest('put', `/offers/${offerId}/stock`, {
+async function updateOfferStock(account, offerId, stockQty) {
+  return bolRequest(account, 'put', `/offers/${offerId}/stock`, {
     data: {
       amount: stockQty,
       managedByRetailer: true
@@ -77,8 +80,8 @@ async function updateOfferStock(offerId, stockQty) {
 }
 
 // تحديث السعر لعرض (offer) معين على bol.com
-async function updateOfferPrice(offerId, price) {
-  return bolRequest('put', `/offers/${offerId}/price`, {
+async function updateOfferPrice(account, offerId, price) {
+  return bolRequest(account, 'put', `/offers/${offerId}/price`, {
     data: {
       pricing: {
         bundlePrices: [{ quantity: 1, unitPrice: Number(price) }]
@@ -87,51 +90,45 @@ async function updateOfferPrice(offerId, price) {
   });
 }
 
-// جلب تفاصيل عرض معين - مستخدمة لمعرفة onHoldByRetailer الحالية قبل تحديث الـ reference
-async function getOfferById(offerId) {
-  return bolRequest('get', `/offers/${offerId}`);
+// جلب تفاصيل عرض معين
+async function getOfferById(account, offerId) {
+  return bolRequest(account, 'get', `/offers/${offerId}`);
 }
 
-// تحديث الـ reference (اللي بنستخدمه كـ SKU/EAN reference) لعرض معين
-// endpoint "Update an offer" بيحدّث reference و onHoldByRetailer بس (مش كل بيانات العرض)
-// فمحتاجينش نجيب العرض كامل أو نخاف نمسح economicOperatorId أو أي حاجة تانية
-async function updateOfferReference(offerId, reference, onHoldByRetailer) {
-  let holdValue = onHoldByRetailer;
-  if (holdValue === undefined) {
-    const current = await getOfferById(offerId);
-    holdValue = current.onHoldByRetailer ?? false;
-  }
-  return bolRequest('put', `/offers/${offerId}`, {
-    data: { reference, onHoldByRetailer: holdValue }
-  });
+// تحديث الـ reference (SKU) لعرض معين
+// ملحوظة مهمة: توثيق bol.com الرسمي (ReDoc) بيوضح إن الـ endpoint ده فعليًا بياخد بيانات
+// العرض كاملة (مش reference بس)، فبنجيب العرض الحالي ونبعته تاني بالـ reference الجديد بس،
+// مع الحفاظ على economicOperatorId لو موجود (لأن حذفه من الطلب بيفك ربطه تلقائيًا)
+async function updateOfferReference(account, offerId, reference) {
+  const current = await getOfferById(account, offerId);
+
+  const payload = {
+    ean: current.ean,
+    reference,
+    onHoldByRetailer: current.onHoldByRetailer ?? false,
+    condition: current.condition,
+    pricing: current.pricing,
+    stock: {
+      amount: current.stock?.amount ?? 0,
+      managedByRetailer: current.stock?.managedByRetailer ?? true
+    },
+    fulfilment: current.fulfilment
+  };
+
+  if (current.economicOperatorId) payload.economicOperatorId = current.economicOperatorId;
+  if (current.unknownProductTitle) payload.unknownProductTitle = current.unknownProductTitle;
+
+  return bolRequest(account, 'put', `/offers/${offerId}`, { data: payload });
 }
 
-// جلب كل العروض (Offers) بتاعة الحساب - مفيد للمزامنة الأولى
-async function getOffers(page = 1) {
-  return bolRequest('get', '/offers', { params: { page } });
+// ---------- استيراد كل عروض حساب معين من bol.com (Offer Export) ----------
+async function requestOfferExport(account) {
+  return bolRequest(account, 'post', '/offers/export', { data: { format: 'CSV' } });
 }
 
-// ---------- استيراد كل عروضي من bol.com (Offer Export) ----------
-// الخطوات: 1) نطلب تصدير  2) نستنى لحد ما يخلص (process-status)  3) ننزّل ملف الـ CSV
-async function requestOfferExport() {
-  const token = await getAccessToken();
-  const res = await axios.post(
-    `${BASE_URL}/offers/export`,
-    { format: 'CSV' },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: `application/vnd.retailer.${API_VERSION}+json`,
-        'Content-Type': `application/vnd.retailer.${API_VERSION}+json`
-      }
-    }
-  );
-  return res.data; // فيها processStatusId
-}
-
-async function getProcessStatus(processStatusId) {
+async function getProcessStatus(account, processStatusId) {
   // مسار process-status بيعيش تحت /shared مش تحت /retailer (تغيير من bol.com من v7)
-  const token = await getAccessToken();
+  const token = await getAccessToken(account);
   const res = await axios.get(`${SHARED_BASE_URL}/process-status/${processStatusId}`, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -142,9 +139,9 @@ async function getProcessStatus(processStatusId) {
 }
 
 // بننتظر لحد ما يخلص التصدير (بيرجع الـ report-id لما يخلص)
-async function waitForExportReady(processStatusId, { maxAttempts = 30, delayMs = 4000 } = {}) {
+async function waitForExportReady(account, processStatusId, { maxAttempts = 30, delayMs = 4000 } = {}) {
   for (let i = 0; i < maxAttempts; i++) {
-    const status = await getProcessStatus(processStatusId);
+    const status = await getProcessStatus(account, processStatusId);
     if (status.status === 'SUCCESS') {
       return status.entityId; // ده الـ report-id
     }
@@ -156,8 +153,8 @@ async function waitForExportReady(processStatusId, { maxAttempts = 30, delayMs =
   throw new Error('استغرق تجهيز ملف التصدير وقت طويل جدًا - جرب تاني بعد شوية');
 }
 
-async function downloadOfferExportCsv(reportId) {
-  const token = await getAccessToken();
+async function downloadOfferExportCsv(account, reportId) {
+  const token = await getAccessToken(account);
   const res = await axios.get(`${BASE_URL}/offers/export/${reportId}`, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -177,7 +174,6 @@ module.exports = {
   updateOfferPrice,
   getOfferById,
   updateOfferReference,
-  getOffers,
   requestOfferExport,
   getProcessStatus,
   waitForExportReady,

@@ -10,8 +10,10 @@ const bol = require('./bolClient');
 async function pushProductToBol(product) {
   const offers = db
     .prepare(
-      `SELECT * FROM product_offers
-       WHERE product_id = ? AND active = 1 AND bol_offer_id IS NOT NULL AND bol_offer_id != ''`
+      `SELECT o.*, a.name as account_name, a.client_id, a.client_secret
+       FROM product_offers o
+       LEFT JOIN bol_accounts a ON a.id = o.account_id
+       WHERE o.product_id = ? AND o.active = 1 AND o.bol_offer_id IS NOT NULL AND o.bol_offer_id != ''`
     )
     .all(product.id);
 
@@ -22,17 +24,25 @@ async function pushProductToBol(product) {
   const results = [];
 
   for (const offer of offers) {
-    const offerResult = { ean: offer.ean, bol_offer_id: offer.bol_offer_id };
+    const offerResult = { ean: offer.ean, bol_offer_id: offer.bol_offer_id, account: offer.account_name };
+
+    if (!offer.account_id || !offer.client_id) {
+      offerResult.price = offerResult.stock = offerResult.sku = 'فشل ❌: الـ EAN ده مش مربوط بأي حساب bol.com';
+      results.push(offerResult);
+      continue;
+    }
+
+    const account = { id: offer.account_id, client_id: offer.client_id, client_secret: offer.client_secret };
 
     try {
-      await bol.updateOfferPrice(offer.bol_offer_id, offer.sell_price);
+      await bol.updateOfferPrice(account, offer.bol_offer_id, offer.sell_price);
       offerResult.price = 'تم ✅';
     } catch (e) {
       offerResult.price = 'فشل ❌: ' + (e.response?.data?.detail || e.message);
     }
 
     try {
-      await bol.updateOfferStock(offer.bol_offer_id, product.stock_qty);
+      await bol.updateOfferStock(account, offer.bol_offer_id, product.stock_qty);
       offerResult.stock = 'تم ✅';
     } catch (e) {
       offerResult.stock = 'فشل ❌: ' + (e.response?.data?.detail || e.message);
@@ -40,7 +50,7 @@ async function pushProductToBol(product) {
 
     if (offer.reference) {
       try {
-        await bol.updateOfferReference(offer.bol_offer_id, offer.reference);
+        await bol.updateOfferReference(account, offer.bol_offer_id, offer.reference);
         offerResult.sku = 'تم ✅';
       } catch (e) {
         offerResult.sku = 'فشل ❌: ' + (e.response?.data?.detail || e.message);

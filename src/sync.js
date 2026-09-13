@@ -4,11 +4,11 @@ const bol = require('./bolClient');
 let isSyncing = false;
 
 /**
- * خطوات المزامنة:
- * 1. نجيب الطلبات المفتوحة من bol.com
- * 2. أي عنصر أوردر لسه ما تسجلش عندنا -> نلاقي الـ EAN في جدول العروض، نعرف المنتج الأساسي بتاعه،
- *    وننزّل من المخزون المشترك للمنتج ده (مش من العرض نفسه)
- * 3. أي منتج اتغيّر مخزونه -> نبعت المخزون الجديد لكل الـ EANs المرتبطة بيه على bol.com
+ * بتلف على كل حسابات bol.com النشطة، ولكل حساب:
+ * 1. تجيب الطلبات المفتوحة
+ * 2. أي عنصر أوردر جديد -> تلاقي الـ EAN في جدول العروض (لنفس الحساب ده)، تعرف المنتج الأساسي،
+ *    وتنزّل من المخزون المشترك بتاعه
+ * 3. تبعت المخزون المحدّث لكل الـ EANs بتاعة كل الحسابات المرتبطة بنفس المنتج
  */
 async function runSync() {
   if (isSyncing) {
@@ -21,63 +21,66 @@ async function runSync() {
   const errors = [];
 
   try {
-    let ordersData;
-    try {
-      ordersData = await bol.getOpenOrders();
-    } catch (e) {
-      errors.push('فشل جلب الطلبات من bol.com: ' + (e.response?.data?.detail || e.message));
-      ordersData = null;
+    const accounts = db.prepare('SELECT * FROM bol_accounts WHERE active = 1').all();
+
+    if (!accounts.length) {
+      errors.push('مفيش أي حساب bol.com مضاف لسه - روح تاب "حسابات bol.com" وضيف واحد');
     }
 
-    const orders = ordersData?.orders || [];
-
-    for (const orderSummary of orders) {
+    for (const account of accounts) {
+      let ordersData;
       try {
-        const order = await bol.getOrderDetails(orderSummary.orderId);
-        const items = order.orderItems || [];
-
-        for (const item of items) {
-          const orderItemId = item.orderItemId;
-          const ean = item.product?.ean;
-          const quantity = item.quantity || 1;
-          const unitPrice = item.unitPrice || 0;
-
-          const alreadyRecorded = db
-            .prepare('SELECT id FROM sales WHERE bol_order_item_id = ?')
-            .get(orderItemId);
-          if (alreadyRecorded) continue;
-
-          const offer = db.prepare('SELECT * FROM product_offers WHERE ean = ?').get(ean);
-          if (!offer) {
-            errors.push(`EAN ${ean} من أوردر bol.com مش مربوط بأي منتج عندك - اتجاهل`);
-            continue;
-          }
-
-          const product = db.prepare('SELECT * FROM products WHERE id = ?').get(offer.product_id);
-          if (!product) {
-            errors.push(`المنتج الأساسي بتاع EAN ${ean} مش موجود - اتجاهل`);
-            continue;
-          }
-
-          db.prepare(
-            `INSERT INTO sales (product_id, offer_id, bol_order_id, bol_order_item_id, quantity, sale_price, cost_price, source)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'bol')`
-          ).run(product.id, offer.id, orderSummary.orderId, orderItemId, quantity, unitPrice, product.cost_price);
-
-          const newStock = Math.max(0, product.stock_qty - quantity);
-          db.prepare('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
-            newStock,
-            product.id
-          );
-
-          ordersProcessed++;
-        }
+        ordersData = await bol.getOpenOrders(account);
       } catch (e) {
-        errors.push(`خطأ في معالجة أوردر ${orderSummary.orderId}: ${e.message}`);
+        errors.push(`فشل جلب الطلبات لحساب "${account.name}": ` + (e.response?.data?.detail || e.message));
+        continue;
+      }
+
+      const orders = ordersData?.orders || [];
+
+      for (const orderSummary of orders) {
+        try {
+          const order = await bol.getOrderDetails(account, orderSummary.orderId);
+          const items = order.orderItems || [];
+
+          for (const item of items) {
+            const orderItemId = item.orderItemId;
+            const ean = item.product?.ean;
+            const quantity = item.quantity || 1;
+            const unitPrice = item.unitPrice || 0;
+
+            const alreadyRecorded = db.prepare('SELECT id FROM sales WHERE bol_order_item_id = ?').get(orderItemId);
+            if (alreadyRecorded) continue;
+
+            const offer = db.prepare('SELECT * FROM product_offers WHERE ean = ? AND account_id = ?').get(ean, account.id);
+            if (!offer) {
+              errors.push(`EAN ${ean} من طلب حساب "${account.name}" مش مربوط بأي منتج عندك - اتجاهل`);
+              continue;
+            }
+
+            const product = db.prepare('SELECT * FROM products WHERE id = ?').get(offer.product_id);
+            if (!product) continue;
+
+            db.prepare(
+              `INSERT INTO sales (product_id, offer_id, bol_order_id, bol_order_item_id, quantity, sale_price, cost_price, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'bol')`
+            ).run(product.id, offer.id, orderSummary.orderId, orderItemId, quantity, unitPrice, product.cost_price);
+
+            const newStock = Math.max(0, product.stock_qty - quantity);
+            db.prepare('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+              newStock,
+              product.id
+            );
+
+            ordersProcessed++;
+          }
+        } catch (e) {
+          errors.push(`خطأ في معالجة أوردر ${orderSummary.orderId} (حساب "${account.name}"): ${e.message}`);
+        }
       }
     }
 
-    // دفع المخزون المحدّث لكل الـ EANs المرتبطة بأي منتج نشط
+    // دفع المخزون المحدّث لكل الـ EANs المرتبطة بأي منتج نشط، على أي حساب كانوا
     const productsToPush = db
       .prepare(
         `SELECT DISTINCT p.* FROM products p
@@ -85,6 +88,8 @@ async function runSync() {
          WHERE o.bol_offer_id IS NOT NULL AND o.bol_offer_id != '' AND o.active = 1 AND p.active = 1`
       )
       .all();
+
+    const accountsById = new Map(accounts.map((a) => [a.id, a]));
 
     for (const product of productsToPush) {
       const offers = db
@@ -94,11 +99,18 @@ async function runSync() {
         .all(product.id);
 
       for (const offer of offers) {
+        const account = accountsById.get(offer.account_id);
+        if (!account) {
+          errors.push(`EAN ${offer.ean} مش مربوط بحساب bol.com نشط - اتجاهل من المزامنة`);
+          continue;
+        }
         try {
-          await bol.updateOfferStock(offer.bol_offer_id, product.stock_qty);
+          await bol.updateOfferStock(account, offer.bol_offer_id, product.stock_qty);
           stockPushed++;
         } catch (e) {
-          errors.push(`فشل تحديث مخزون ${product.sku} (EAN: ${offer.ean}) على bol.com: ${e.response?.data?.detail || e.message}`);
+          errors.push(
+            `فشل تحديث مخزون ${product.sku} (EAN: ${offer.ean}, حساب: ${account.name}): ${e.response?.data?.detail || e.message}`
+          );
         }
       }
     }

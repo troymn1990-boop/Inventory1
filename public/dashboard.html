@@ -15,6 +15,7 @@
     <button class="tab-btn" data-tab="products">المخزون</button>
     <button class="tab-btn" data-tab="reports">تقارير الأرباح</button>
     <button class="tab-btn" data-tab="sync">المزامنة مع bol.com</button>
+    <button class="tab-btn" data-tab="accounts">حسابات bol.com</button>
   </div>
   <div class="nav-right">
     <span id="username-display"></span>
@@ -71,12 +72,13 @@
   <section id="sync" class="tab-content">
     <div class="panel">
       <h3>📥 استيراد كل منتجاتك من bol.com</h3>
-      <p class="hint-text">بيسحب كل عروضك الحالية على bol.com ويطابقها بالمخزون عندك عن طريق الباركود (EAN) أو الـ SKU. ممكن ياخد دقيقة أو دقيقتين.</p>
+      <p class="hint-text">بيسحب كل عروض حساب معين على bol.com ويطابقها بالمخزون عندك عن طريق الباركود (EAN) أو الـ SKU. ممكن ياخد دقيقة أو دقيقتين.</p>
+      <label>اختار الحساب: <select id="importAccountSelect"></select></label>
       <button id="importFromBolBtn" class="btn-primary">استيراد المنتجات من bol.com</button>
       <p id="importStatus"></p>
     </div>
     <div class="panel">
-      <h3>🔄 المزامنة الدورية (طلبات + مخزون)</h3>
+      <h3>🔄 المزامنة الدورية (طلبات + مخزون - لكل الحسابات مع بعض)</h3>
       <button id="runSyncBtn" class="btn-primary">شغّل المزامنة دلوقتي</button>
       <p id="syncStatus"></p>
     </div>
@@ -84,6 +86,17 @@
       <h3>سجل آخر عمليات المزامنة</h3>
       <table id="syncLogTable"><thead><tr><th>الوقت</th><th>الحالة</th><th>طلبات اتعالجت</th><th>تحديثات مخزون اتبعتت</th><th>تفاصيل</th></tr></thead><tbody></tbody></table>
     </div>
+  </section>
+
+  <!-- حسابات bol.com -->
+  <section id="accounts" class="tab-content">
+    <div class="toolbar">
+      <button id="addAccountBtn" class="btn-primary">+ إضافة حساب bol.com جديد</button>
+    </div>
+    <table id="accountsTable">
+      <thead><tr><th>الاسم</th><th>Client ID</th><th>Client Secret</th><th>الحالة</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
   </section>
 </main>
 
@@ -111,11 +124,12 @@
   <div class="modal-box offers-modal-box">
     <h3 id="offersModalTitle">EANs المرتبطة بـ ...</h3>
     <table id="offersTable">
-      <thead><tr><th>الباركود (EAN)</th><th>Offer ID</th><th>Reference (SKU على bol)</th><th>سعر البيع</th><th></th></tr></thead>
+      <thead><tr><th>الحساب</th><th>الباركود (EAN)</th><th>Offer ID</th><th>Reference (SKU على bol)</th><th>سعر البيع</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
     <h4>إضافة EAN جديد</h4>
     <form id="offerForm">
+      <label>الحساب على bol.com</label><select id="o_account"></select>
       <label>الباركود (EAN)</label><input type="text" id="o_ean">
       <label>Offer ID على bol.com</label><input type="text" id="o_offer">
       <label>Reference (SKU الظاهر على bol.com)</label><input type="text" id="o_reference">
@@ -123,6 +137,23 @@
       <div class="modal-actions">
         <button type="button" id="closeOffersModalBtn" class="btn-secondary">قفل</button>
         <button type="submit" class="btn-primary">إضافة EAN</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Modal إضافة/تعديل حساب bol.com -->
+<div id="accountModal" class="modal hidden">
+  <div class="modal-box">
+    <h3 id="accountModalTitle">إضافة حساب bol.com</h3>
+    <form id="accountForm">
+      <input type="hidden" id="a_id">
+      <label>اسم الحساب (للتمييز بس)</label><input type="text" id="a_name" required>
+      <label>Client ID</label><input type="text" id="a_client_id" required>
+      <label>Client Secret</label><input type="text" id="a_client_secret" placeholder="سيبه فاضي لو مش عايز تغيّره">
+      <div class="modal-actions">
+        <button type="button" id="cancelAccountModalBtn" class="btn-secondary">إلغاء</button>
+        <button type="submit" class="btn-primary">حفظ</button>
       </div>
     </form>
   </div>

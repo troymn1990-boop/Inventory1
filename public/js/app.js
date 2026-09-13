@@ -23,7 +23,8 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     document.getElementById(btn.dataset.tab).classList.add('active');
     if (btn.dataset.tab === 'overview') loadOverview();
     if (btn.dataset.tab === 'products') loadProducts();
-    if (btn.dataset.tab === 'sync') loadSyncLog();
+    if (btn.dataset.tab === 'sync') { loadSyncLog(); loadAccountsForImportSelect(); }
+    if (btn.dataset.tab === 'accounts') loadAccounts();
   });
 });
 
@@ -166,6 +167,7 @@ let currentOffersProductId = null;
 window.openOffersModal = async (productId, sku) => {
   currentOffersProductId = productId;
   document.getElementById('offersModalTitle').textContent = `EANs المرتبطة بـ ${sku}`;
+  await populateAccountSelect(document.getElementById('o_account'));
   await loadOffers();
   offersModal.classList.remove('hidden');
 };
@@ -175,18 +177,33 @@ document.getElementById('closeOffersModalBtn').addEventListener('click', () => {
   loadProducts(); // نحدّث عدد الـ EANs في الجدول بعد القفل
 });
 
+async function populateAccountSelect(selectEl, selectedId = null) {
+  const res = await fetch('/api/accounts');
+  const { accounts } = await res.json();
+  selectEl.innerHTML =
+    '<option value="">بدون حساب</option>' +
+    accounts.map(a => `<option value="${a.id}" ${a.id === selectedId ? 'selected' : ''}>${a.name}</option>`).join('');
+}
+
 async function loadOffers() {
   const res = await fetch(`/api/products/${currentOffersProductId}/offers`);
   const { offers } = await res.json();
+  const accountsRes = await fetch('/api/accounts');
+  const { accounts } = await accountsRes.json();
+  const accountOptions = (selectedId) =>
+    '<option value="">بدون حساب</option>' +
+    accounts.map(a => `<option value="${a.id}" ${a.id === selectedId ? 'selected' : ''}>${a.name}</option>`).join('');
+
   document.querySelector('#offersTable tbody').innerHTML = offers.map(o => `
     <tr>
+      <td><select onchange="updateOfferField(${o.id}, 'account_id', this.value)" style="width:110px">${accountOptions(o.account_id)}</select></td>
       <td><input type="text" value="${o.ean || ''}" onchange="updateOfferField(${o.id}, 'ean', this.value)" style="width:110px"></td>
       <td><input type="text" value="${o.bol_offer_id || ''}" onchange="updateOfferField(${o.id}, 'bol_offer_id', this.value)" style="width:110px"></td>
       <td><input type="text" value="${o.reference || ''}" onchange="updateOfferField(${o.id}, 'reference', this.value)" style="width:100px"></td>
       <td><input type="number" step="0.01" value="${o.sell_price}" onchange="updateOfferField(${o.id}, 'sell_price', this.value)" style="width:80px"></td>
       <td><button class="icon-btn" onclick="deleteOffer(${o.id})">🗑️</button></td>
     </tr>
-  `).join('') || '<tr><td colspan="5">مفيش EANs مرتبطة لسه - ضيف واحد تحت</td></tr>';
+  `).join('') || '<tr><td colspan="6">مفيش EANs مرتبطة لسه - ضيف واحد تحت</td></tr>';
 }
 
 window.updateOfferField = async (offerId, field, value) => {
@@ -206,6 +223,7 @@ window.deleteOffer = async (offerId) => {
 document.getElementById('offerForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const body = {
+    account_id: document.getElementById('o_account').value || null,
     ean: document.getElementById('o_ean').value,
     bol_offer_id: document.getElementById('o_offer').value,
     reference: document.getElementById('o_reference').value,
@@ -364,11 +382,18 @@ let importPollInterval = null;
 document.getElementById('importFromBolBtn').addEventListener('click', async () => {
   const btn = document.getElementById('importFromBolBtn');
   const statusEl = document.getElementById('importStatus');
+  const accountId = document.getElementById('importAccountSelect').value;
+  if (!accountId) { statusEl.textContent = '❌ اختار الحساب الأول'; return; }
+
   btn.disabled = true;
   statusEl.textContent = '⏳ جاري بدء الاستيراد...';
 
   try {
-    const res = await fetch('/api/sync/import-from-bol', { method: 'POST' });
+    const res = await fetch('/api/sync/import-from-bol', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountId })
+    });
     const data = await res.json();
     if (!res.ok || !data.ok) {
       statusEl.textContent = '❌ تعذّر بدء الاستيراد: ' + (data.error || 'خطأ غير معروف');
@@ -382,6 +407,10 @@ document.getElementById('importFromBolBtn').addEventListener('click', async () =
     btn.disabled = false;
   }
 });
+
+async function loadAccountsForImportSelect() {
+  await populateAccountSelect(document.getElementById('importAccountSelect'));
+}
 
 function pollImportStatus() {
   const btn = document.getElementById('importFromBolBtn');
@@ -434,6 +463,69 @@ async function loadSyncLog() {
     <tr><td>${new Date(l.ran_at).toLocaleString('ar-EG')}</td><td>${l.status}</td><td>${l.orders_processed}</td><td>${l.stock_pushed}</td><td>${l.message || '-'}</td></tr>
   `).join('') || '<tr><td colspan="5">مفيش سجل مزامنة لسه</td></tr>';
 }
+
+// ================= حسابات bol.com =================
+async function loadAccounts() {
+  const res = await fetch('/api/accounts');
+  const { accounts } = await res.json();
+  document.querySelector('#accountsTable tbody').innerHTML = accounts.map(a => `
+    <tr>
+      <td>${a.name}</td>
+      <td>${a.client_id}</td>
+      <td>${a.client_secret}</td>
+      <td>${a.active ? 'نشط ✅' : 'متوقف ⏸️'}</td>
+      <td>
+        <button class="icon-btn" onclick="editAccount(${a.id})">✏️</button>
+        <button class="icon-btn" onclick="deleteAccount(${a.id})">🗑️</button>
+      </td>
+    </tr>
+  `).join('') || '<tr><td colspan="5">مفيش حسابات مضافة لسه</td></tr>';
+}
+
+const accountModal = document.getElementById('accountModal');
+document.getElementById('addAccountBtn').addEventListener('click', () => openAccountModal());
+document.getElementById('cancelAccountModalBtn').addEventListener('click', () => accountModal.classList.add('hidden'));
+
+function openAccountModal(account = null) {
+  document.getElementById('accountModalTitle').textContent = account ? 'تعديل الحساب' : 'إضافة حساب bol.com جديد';
+  document.getElementById('a_id').value = account?.id || '';
+  document.getElementById('a_name').value = account?.name || '';
+  document.getElementById('a_client_id').value = account?.client_id || '';
+  document.getElementById('a_client_secret').value = '';
+  accountModal.classList.remove('hidden');
+}
+
+window.editAccount = async (id) => {
+  const res = await fetch('/api/accounts');
+  const { accounts } = await res.json();
+  const account = accounts.find(a => a.id === id);
+  if (account) openAccountModal(account);
+};
+
+window.deleteAccount = async (id) => {
+  if (!confirm('متأكد إنك عايز تمسح الحساب ده؟')) return;
+  const res = await fetch('/api/accounts/' + id, { method: 'DELETE' });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'حصل خطأ'); return; }
+  loadAccounts();
+};
+
+document.getElementById('accountForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const id = document.getElementById('a_id').value;
+  const body = {
+    name: document.getElementById('a_name').value,
+    client_id: document.getElementById('a_client_id').value,
+    client_secret: document.getElementById('a_client_secret').value
+  };
+  const url = id ? '/api/accounts/' + id : '/api/accounts';
+  const method = id ? 'PUT' : 'POST';
+  const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) { alert(data.error || 'حصل خطأ'); return; }
+  accountModal.classList.add('hidden');
+  loadAccounts();
+});
 
 // تحميل أولي
 loadOverview();

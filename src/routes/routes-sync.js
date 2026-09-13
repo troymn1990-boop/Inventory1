@@ -14,7 +14,9 @@ router.post('/run', async (req, res) => {
 
 // بيبدأ استيراد العروض من bol.com في الخلفية ويرجع فورًا (مش بيستنى لحد ما يخلص)
 router.post('/import-from-bol', (req, res) => {
-  const job = startImportJob();
+  const { accountId } = req.body;
+  if (!accountId) return res.status(400).json({ error: 'لازم تحدد الحساب اللي عايز تستورد منه' });
+  const job = startImportJob(accountId);
   res.json({ ok: true, status: job.status });
 });
 
