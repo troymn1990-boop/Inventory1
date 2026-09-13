@@ -103,7 +103,6 @@ async function updateOfferReference(account, offerId, reference) {
   const current = await getOfferById(account, offerId);
 
   const payload = {
-    ean: current.ean,
     reference,
     onHoldByRetailer: current.onHoldByRetailer ?? false,
     condition: current.condition,
