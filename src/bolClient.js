@@ -104,7 +104,8 @@ async function updateOfferReference(account, offerId, reference) {
 
   const payload = {
     reference,
-    onHoldByRetailer: current.onHoldByRetailer ?? false
+    onHoldByRetailer: current.onHoldByRetailer ?? false,
+    fulfilment: current.fulfilment
   };
 
   if (current.economicOperatorId) payload.economicOperatorId = current.economicOperatorId;
