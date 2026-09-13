@@ -104,18 +104,10 @@ async function updateOfferReference(account, offerId, reference) {
 
   const payload = {
     reference,
-    onHoldByRetailer: current.onHoldByRetailer ?? false,
-    condition: current.condition,
-    pricing: current.pricing,
-    stock: {
-      amount: current.stock?.amount ?? 0,
-      managedByRetailer: current.stock?.managedByRetailer ?? true
-    },
-    fulfilment: current.fulfilment
+    onHoldByRetailer: current.onHoldByRetailer ?? false
   };
 
   if (current.economicOperatorId) payload.economicOperatorId = current.economicOperatorId;
-  if (current.unknownProductTitle) payload.unknownProductTitle = current.unknownProductTitle;
 
   return bolRequest(account, 'put', `/offers/${offerId}`, { data: payload });
 }
