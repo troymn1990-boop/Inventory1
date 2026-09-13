@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS products (
   stock_qty INTEGER NOT NULL DEFAULT 0, -- المخزون المشترك بين كل الـ EANs المرتبطة
   low_stock_threshold INTEGER NOT NULL DEFAULT 5,
   category TEXT,
+  image_url TEXT,                       -- رابط صورة المنتج (مرفوعة عندنا أو رابط خارجي)
   active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -131,6 +132,16 @@ function migrateAccountIdColumnIfNeeded() {
   }
 }
 migrateAccountIdColumnIfNeeded();
+
+// ---------- ترحيل: إضافة عمود image_url لو الجدول كان موجود من قبل بدونه ----------
+function migrateImageUrlColumnIfNeeded() {
+  const columns = db.prepare("PRAGMA table_info(products)").all().map((c) => c.name);
+  if (!columns.includes('image_url')) {
+    db.exec('ALTER TABLE products ADD COLUMN image_url TEXT');
+    console.log('[ترحيل] تم إضافة عمود image_url لجدول products');
+  }
+}
+migrateImageUrlColumnIfNeeded();
 
 // ---------- ترحيل: لو فيه حساب bol.com قديم متسجل في متغيرات البيئة، نحوّله لحساب في الجدول ----------
 function ensureDefaultAccountFromEnv() {

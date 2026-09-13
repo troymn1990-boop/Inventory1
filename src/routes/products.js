@@ -1,5 +1,7 @@
 const express = require('express');
 const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { parse } = require('csv-parse/sync');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
@@ -7,6 +9,26 @@ const { pushProductToBol, startPushAllJob, getPushJobStatus } = require('../push
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
+
+// صور المنتجات بنخزنها في مجلد data (نفس مكان قاعدة البيانات على الـ Persistent Disk)
+// عشان متتمسحش مع كل نشر جديد على Render
+const uploadsDir = path.join(__dirname, '..', '..', 'data', 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
+const imageUpload = multer({
+  storage: multer.diskStorage({
+    destination: uploadsDir,
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname) || '.jpg';
+      cb(null, `product-${req.params.id}-${Date.now()}${ext}`);
+    }
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB أقصى حجم
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('image/')) return cb(new Error('الملف لازم يكون صورة'));
+    cb(null, true);
+  }
+});
 
 router.use(requireAuth);
 
@@ -38,14 +60,14 @@ router.get('/', (req, res) => {
 });
 
 router.post('/', (req, res) => {
-  const { sku, name, cost_price, stock_qty, low_stock_threshold, category } = req.body;
+  const { sku, name, cost_price, stock_qty, low_stock_threshold, category, image_url } = req.body;
   if (!sku || !name) return res.status(400).json({ error: 'SKU والاسم مطلوبين' });
 
   try {
     const info = db
       .prepare(
-        `INSERT INTO products (sku, name, cost_price, stock_qty, low_stock_threshold, category)
-         VALUES (?, ?, ?, ?, ?, ?)`
+        `INSERT INTO products (sku, name, cost_price, stock_qty, low_stock_threshold, category, image_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         sku,
@@ -53,7 +75,8 @@ router.post('/', (req, res) => {
         Number(cost_price) || 0,
         Number(stock_qty) || 0,
         Number(low_stock_threshold) || 5,
-        category || null
+        category || null,
+        image_url || null
       );
     res.json({ ok: true, id: info.lastInsertRowid });
   } catch (e) {
@@ -62,7 +85,7 @@ router.post('/', (req, res) => {
 });
 
 router.put('/:id', (req, res) => {
-  const { name, cost_price, stock_qty, low_stock_threshold, category, active } = req.body;
+  const { name, cost_price, stock_qty, low_stock_threshold, category, image_url, active } = req.body;
   db.prepare(
     `UPDATE products SET
       name = COALESCE(?, name),
@@ -70,11 +93,27 @@ router.put('/:id', (req, res) => {
       stock_qty = COALESCE(?, stock_qty),
       low_stock_threshold = COALESCE(?, low_stock_threshold),
       category = ?,
+      image_url = COALESCE(?, image_url),
       active = COALESCE(?, active),
       updated_at = CURRENT_TIMESTAMP
      WHERE id = ?`
-  ).run(name, cost_price, stock_qty, low_stock_threshold, category || null, active, req.params.id);
+  ).run(name, cost_price, stock_qty, low_stock_threshold, category || null, image_url, active, req.params.id);
   res.json({ ok: true });
+});
+
+// رفع صورة من الجهاز مباشرة لمنتج موجود
+router.post('/:id/image', (req, res) => {
+  imageUpload.single('image')(req, res, (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: 'مفيش صورة اتبعتت' });
+
+    const imageUrl = `/uploads/${req.file.filename}`;
+    db.prepare('UPDATE products SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+      imageUrl,
+      req.params.id
+    );
+    res.json({ ok: true, image_url: imageUrl });
+  });
 });
 
 router.delete('/:id', (req, res) => {

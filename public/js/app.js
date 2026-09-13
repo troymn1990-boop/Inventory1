@@ -64,6 +64,7 @@ async function loadProducts() {
   const tbody = document.querySelector('#productsTable tbody');
   tbody.innerHTML = data.products.map(p => `
     <tr class="${p.stock_qty <= p.low_stock_threshold ? 'low-stock-row' : ''}">
+      <td>${p.image_url ? `<img src="${p.image_url}" class="product-thumb">` : `<div class="product-thumb-placeholder">📦</div>`}</td>
       <td>${p.sku}</td>
       <td>${p.name}</td>
       <td>${money(p.cost_price)}</td>
@@ -76,7 +77,7 @@ async function loadProducts() {
         <button class="icon-btn" onclick="deleteProduct(${p.id})">🗑️</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="6">مفيش نتائج</td></tr>';
+  `).join('') || '<tr><td colspan="7">مفيش نتائج</td></tr>';
 
   const totalPages = Math.max(1, Math.ceil(data.total / productsState.pageSize));
   const pag = document.getElementById('pagination');
@@ -112,6 +113,8 @@ const modal = document.getElementById('productModal');
 document.getElementById('addProductBtn').addEventListener('click', () => openModal());
 document.getElementById('cancelModalBtn').addEventListener('click', () => modal.classList.add('hidden'));
 
+let currentEditingProductId = null;
+
 function openModal(product = null) {
   document.getElementById('modalTitle').textContent = product ? 'تعديل المنتج الأساسي' : 'إضافة منتج أساسي جديد';
   document.getElementById('productId').value = product?.id || '';
@@ -121,8 +124,75 @@ function openModal(product = null) {
   document.getElementById('f_cost').value = product?.cost_price ?? '';
   document.getElementById('f_stock').value = product?.stock_qty ?? '';
   document.getElementById('f_threshold').value = product?.low_stock_threshold ?? 5;
+
+  currentEditingProductId = product?.id || null;
+  const imageSection = document.getElementById('imageSection');
+  const preview = document.getElementById('productImagePreview');
+  document.getElementById('f_image_file').value = '';
+  document.getElementById('f_image_url').value = '';
+  document.getElementById('imageUploadStatus').textContent = '';
+
+  if (product) {
+    imageSection.style.display = 'block';
+    if (product.image_url) {
+      preview.src = product.image_url;
+      preview.style.display = 'block';
+    } else {
+      preview.style.display = 'none';
+    }
+  } else {
+    // المنتج لسه مش متحفظ - لازم نحفظه الأول قبل ما نقدر نرفعله صورة
+    imageSection.style.display = 'none';
+  }
+
   modal.classList.remove('hidden');
 }
+
+document.getElementById('uploadImageBtn').addEventListener('click', async () => {
+  const fileInput = document.getElementById('f_image_file');
+  const statusEl = document.getElementById('imageUploadStatus');
+  if (!fileInput.files[0]) { statusEl.textContent = 'اختار ملف صورة الأول'; return; }
+  if (!currentEditingProductId) { statusEl.textContent = 'احفظ المنتج الأول قبل ما ترفع صورة'; return; }
+
+  const formData = new FormData();
+  formData.append('image', fileInput.files[0]);
+  statusEl.textContent = '⏳ جاري الرفع...';
+
+  try {
+    const res = await fetch(`/api/products/${currentEditingProductId}/image`, { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) { statusEl.textContent = '❌ ' + (data.error || 'فشل الرفع'); return; }
+    document.getElementById('productImagePreview').src = data.image_url + '?t=' + Date.now();
+    document.getElementById('productImagePreview').style.display = 'block';
+    statusEl.textContent = '✅ تم رفع الصورة';
+    loadProducts();
+  } catch (e) {
+    statusEl.textContent = '❌ مشكلة في الاتصال بالسيرفر';
+  }
+});
+
+document.getElementById('saveImageUrlBtn').addEventListener('click', async () => {
+  const urlInput = document.getElementById('f_image_url');
+  const statusEl = document.getElementById('imageUploadStatus');
+  if (!urlInput.value.trim()) { statusEl.textContent = 'الصق رابط صورة الأول'; return; }
+  if (!currentEditingProductId) { statusEl.textContent = 'احفظ المنتج الأول قبل ما تضيف صورة'; return; }
+
+  try {
+    const res = await fetch(`/api/products/${currentEditingProductId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_url: urlInput.value.trim() })
+    });
+    const data = await res.json();
+    if (!res.ok) { statusEl.textContent = '❌ ' + (data.error || 'فشل الحفظ'); return; }
+    document.getElementById('productImagePreview').src = urlInput.value.trim();
+    document.getElementById('productImagePreview').style.display = 'block';
+    statusEl.textContent = '✅ تم حفظ الرابط';
+    loadProducts();
+  } catch (e) {
+    statusEl.textContent = '❌ مشكلة في الاتصال بالسيرفر';
+  }
+});
 
 let allProductsCache = [];
 window.editProduct = async (id) => {
@@ -155,6 +225,17 @@ document.getElementById('productForm').addEventListener('submit', async (e) => {
   const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const data = await res.json();
   if (!res.ok) { alert(data.error || 'حصل خطأ'); return; }
+
+  if (!id) {
+    // منتج جديد اتحفظ - نفضل المودال مفتوح ونوريله قسم رفع الصورة على طول
+    currentEditingProductId = data.id;
+    document.getElementById('productId').value = data.id;
+    document.getElementById('f_sku').disabled = true;
+    document.getElementById('modalTitle').textContent = 'تم الحفظ! تقدر تضيف صورة دلوقتي';
+    document.getElementById('imageSection').style.display = 'block';
+    loadProducts();
+    return;
+  }
 
   modal.classList.add('hidden');
   loadProducts();

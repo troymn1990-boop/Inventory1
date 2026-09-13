@@ -3,6 +3,7 @@ const express = require('express');
 const cookieParser = require('cookie-parser');
 const cron = require('node-cron');
 const path = require('path');
+const fs = require('fs');
 
 const authRoutes = require('./src/routes/auth');
 const productsRoutes = require('./src/routes/products');
@@ -17,6 +18,11 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// صور المنتجات المرفوعة بنعرضها من مجلد data (على الـ Persistent Disk، مش بيتمسح مع النشر الجديد)
+const uploadsDir = path.join(__dirname, 'data', 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+app.use('/uploads', express.static(uploadsDir));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/products', productsRoutes);
