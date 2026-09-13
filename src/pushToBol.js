@@ -1,6 +1,19 @@
 const db = require('./db');
 const bol = require('./bolClient');
 
+// بنجيب أدق تفاصيل ممكنة من رد bol.com بالغلط، عشان منتوهش وراء رسالة عامة زي "Bad request"
+function extractBolError(e) {
+  const data = e.response?.data;
+  if (!data) return e.message;
+  const parts = [];
+  if (data.detail) parts.push(data.detail);
+  if (data.title && data.title !== data.detail) parts.push(data.title);
+  if (Array.isArray(data.violations) && data.violations.length) {
+    parts.push(data.violations.map((v) => v.message || v.rule || JSON.stringify(v)).join('; '));
+  }
+  return parts.length ? parts.join(' - ') : JSON.stringify(data);
+}
+
 /**
  * بيبعت آخر بيانات المنتج لكل الـ EANs (العروض) المرتبطة بيه على bol.com:
  * - نفس المخزون المشترك بيتبعت لكل EAN مرتبط (المنصة هي مصدر الحقيقة للمخزون)
@@ -38,14 +51,14 @@ async function pushProductToBol(product) {
       await bol.updateOfferPrice(account, offer.bol_offer_id, offer.sell_price);
       offerResult.price = 'تم ✅';
     } catch (e) {
-      offerResult.price = 'فشل ❌: ' + (e.response?.data?.detail || e.message);
+      offerResult.price = 'فشل ❌: ' + extractBolError(e);
     }
 
     try {
       await bol.updateOfferStock(account, offer.bol_offer_id, product.stock_qty);
       offerResult.stock = 'تم ✅';
     } catch (e) {
-      offerResult.stock = 'فشل ❌: ' + (e.response?.data?.detail || e.message);
+      offerResult.stock = 'فشل ❌: ' + extractBolError(e);
     }
 
     if (offer.reference) {
@@ -53,7 +66,7 @@ async function pushProductToBol(product) {
         await bol.updateOfferReference(account, offer.bol_offer_id, offer.reference);
         offerResult.sku = 'تم ✅';
       } catch (e) {
-        offerResult.sku = 'فشل ❌: ' + (e.response?.data?.detail || e.message);
+        offerResult.sku = 'فشل ❌: ' + extractBolError(e);
       }
     }
 

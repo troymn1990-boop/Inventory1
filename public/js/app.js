@@ -151,8 +151,9 @@ function openModal(product = null) {
 document.getElementById('uploadImageBtn').addEventListener('click', async () => {
   const fileInput = document.getElementById('f_image_file');
   const statusEl = document.getElementById('imageUploadStatus');
-  if (!fileInput.files[0]) { statusEl.textContent = 'اختار ملف صورة الأول'; return; }
-  if (!currentEditingProductId) { statusEl.textContent = 'احفظ المنتج الأول قبل ما ترفع صورة'; return; }
+  statusEl.style.color = 'var(--muted)';
+  if (!fileInput.files[0]) { statusEl.style.color = 'var(--danger)'; statusEl.textContent = '⚠️ اختار ملف صورة الأول'; return; }
+  if (!currentEditingProductId) { statusEl.style.color = 'var(--danger)'; statusEl.textContent = '⚠️ احفظ المنتج الأول قبل ما ترفع صورة'; return; }
 
   const formData = new FormData();
   formData.append('image', fileInput.files[0]);
@@ -161,21 +162,23 @@ document.getElementById('uploadImageBtn').addEventListener('click', async () => 
   try {
     const res = await fetch(`/api/products/${currentEditingProductId}/image`, { method: 'POST', body: formData });
     const data = await res.json();
-    if (!res.ok) { statusEl.textContent = '❌ ' + (data.error || 'فشل الرفع'); return; }
+    if (!res.ok) { statusEl.style.color = 'var(--danger)'; statusEl.textContent = '❌ ' + (data.error || 'فشل الرفع (كود ' + res.status + ')'); return; }
     document.getElementById('productImagePreview').src = data.image_url + '?t=' + Date.now();
     document.getElementById('productImagePreview').style.display = 'block';
-    statusEl.textContent = '✅ تم رفع الصورة';
+    statusEl.style.color = 'var(--primary)';
+    statusEl.textContent = '✅ تم رفع الصورة بنجاح';
     loadProducts();
   } catch (e) {
-    statusEl.textContent = '❌ مشكلة في الاتصال بالسيرفر';
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = '❌ مشكلة في الاتصال بالسيرفر: ' + e.message;
   }
 });
 
 document.getElementById('saveImageUrlBtn').addEventListener('click', async () => {
   const urlInput = document.getElementById('f_image_url');
   const statusEl = document.getElementById('imageUploadStatus');
-  if (!urlInput.value.trim()) { statusEl.textContent = 'الصق رابط صورة الأول'; return; }
-  if (!currentEditingProductId) { statusEl.textContent = 'احفظ المنتج الأول قبل ما تضيف صورة'; return; }
+  if (!urlInput.value.trim()) { statusEl.style.color = 'var(--danger)'; statusEl.textContent = '⚠️ الصق رابط صورة الأول'; return; }
+  if (!currentEditingProductId) { statusEl.style.color = 'var(--danger)'; statusEl.textContent = '⚠️ احفظ المنتج الأول قبل ما تضيف صورة'; return; }
 
   try {
     const res = await fetch(`/api/products/${currentEditingProductId}`, {
@@ -184,13 +187,15 @@ document.getElementById('saveImageUrlBtn').addEventListener('click', async () =>
       body: JSON.stringify({ image_url: urlInput.value.trim() })
     });
     const data = await res.json();
-    if (!res.ok) { statusEl.textContent = '❌ ' + (data.error || 'فشل الحفظ'); return; }
+    if (!res.ok) { statusEl.style.color = 'var(--danger)'; statusEl.textContent = '❌ ' + (data.error || 'فشل الحفظ'); return; }
     document.getElementById('productImagePreview').src = urlInput.value.trim();
     document.getElementById('productImagePreview').style.display = 'block';
+    statusEl.style.color = 'var(--primary)';
     statusEl.textContent = '✅ تم حفظ الرابط';
     loadProducts();
   } catch (e) {
-    statusEl.textContent = '❌ مشكلة في الاتصال بالسيرفر';
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = '❌ مشكلة في الاتصال بالسيرفر: ' + e.message;
   }
 });
 
