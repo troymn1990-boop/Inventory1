@@ -114,6 +114,8 @@ function startPushAllJob() {
           errors.push(`${product.sku}: ${e.message}`);
         }
         currentPushJob.processed++;
+        // تأخير بسيط بين كل منتج والتاني عشان منضغطش على bol.com ونتفادى خطأ 429
+        await new Promise((r) => setTimeout(r, 200));
       }
 
       currentPushJob = {

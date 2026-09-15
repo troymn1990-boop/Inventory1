@@ -112,6 +112,8 @@ async function runSync() {
             `فشل تحديث مخزون ${product.sku} (EAN: ${offer.ean}, حساب: ${account.name}): ${e.response?.data?.detail || e.message}`
           );
         }
+        // تأخير بسيط بين كل تحديث والتاني عشان منضغطش على bol.com ونتفادى خطأ 429
+        await new Promise((r) => setTimeout(r, 200));
       }
     }
 

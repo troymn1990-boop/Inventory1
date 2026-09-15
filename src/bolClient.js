@@ -18,6 +18,32 @@ const API_VERSION = process.env.BOL_API_VERSION || 'v10';
 // كاش توكنات لكل حساب لوحده (مفتاح الماب هو id الحساب)
 const tokenCache = new Map(); // accountId -> { token, expiresAt }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * بتنفذ أي طلب axios، ولو bol.com رجّع 429 (طلبات كتير أوي في وقت قصير)،
+ * بتستنى وتعيد المحاولة تلقائيًا بدل ما تفشل على طول - مهم جدًا لأننا بنعمل
+ * مزامنة جماعية لمئات العروض ومحتمل نتخطى الحد المسموح به من bol.com.
+ */
+async function requestWithRetry(makeRequest, { maxRetries = 4 } = {}) {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await makeRequest();
+    } catch (e) {
+      const status = e.response?.status;
+      if (status === 429 && attempt < maxRetries) {
+        const retryAfterHeader = e.response?.headers?.['retry-after'];
+        const waitSeconds = retryAfterHeader ? Number(retryAfterHeader) : (attempt + 1) * 3;
+        await sleep(Math.min(waitSeconds, 30) * 1000);
+        attempt++;
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 async function getAccessToken(account) {
   if (!account?.client_id || !account?.client_secret) {
     throw new Error('بيانات الاتصال بـ bol.com (Client ID/Secret) ناقصة لهذا الحساب');
@@ -30,12 +56,14 @@ async function getAccessToken(account) {
   }
 
   const basicAuth = Buffer.from(`${account.client_id}:${account.client_secret}`).toString('base64');
-  const res = await axios.post(TOKEN_URL, null, {
-    headers: {
-      Authorization: `Basic ${basicAuth}`,
-      Accept: 'application/json'
-    }
-  });
+  const res = await requestWithRetry(() =>
+    axios.post(TOKEN_URL, null, {
+      headers: {
+        Authorization: `Basic ${basicAuth}`,
+        Accept: 'application/json'
+      }
+    })
+  );
 
   const token = res.data.access_token;
   const expiresAt = now + (res.data.expires_in || 299) * 1000;
@@ -45,17 +73,19 @@ async function getAccessToken(account) {
 
 async function bolRequest(account, method, path, { params, data, accept } = {}) {
   const token = await getAccessToken(account);
-  const res = await axios({
-    method,
-    url: `${BASE_URL}${path}`,
-    params,
-    data,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: accept || `application/vnd.retailer.${API_VERSION}+json`,
-      'Content-Type': data ? `application/vnd.retailer.${API_VERSION}+json` : undefined
-    }
-  });
+  const res = await requestWithRetry(() =>
+    axios({
+      method,
+      url: `${BASE_URL}${path}`,
+      params,
+      data,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: accept || `application/vnd.retailer.${API_VERSION}+json`,
+        'Content-Type': data ? `application/vnd.retailer.${API_VERSION}+json` : undefined
+      }
+    })
+  );
   return res.data;
 }
 
@@ -121,12 +151,14 @@ async function requestOfferExport(account) {
 async function getProcessStatus(account, processStatusId) {
   // مسار process-status بيعيش تحت /shared مش تحت /retailer (تغيير من bol.com من v7)
   const token = await getAccessToken(account);
-  const res = await axios.get(`${SHARED_BASE_URL}/process-status/${processStatusId}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: `application/vnd.retailer.${API_VERSION}+json`
-    }
-  });
+  const res = await requestWithRetry(() =>
+    axios.get(`${SHARED_BASE_URL}/process-status/${processStatusId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: `application/vnd.retailer.${API_VERSION}+json`
+      }
+    })
+  );
   return res.data;
 }
 
@@ -147,14 +179,16 @@ async function waitForExportReady(account, processStatusId, { maxAttempts = 30, 
 
 async function downloadOfferExportCsv(account, reportId) {
   const token = await getAccessToken(account);
-  const res = await axios.get(`${BASE_URL}/offers/export/${reportId}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: `application/vnd.retailer.${API_VERSION}+csv`
-    },
-    responseType: 'text',
-    transformResponse: [(data) => data] // نمنع axios يحاول يحوّلها JSON
-  });
+  const res = await requestWithRetry(() =>
+    axios.get(`${BASE_URL}/offers/export/${reportId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: `application/vnd.retailer.${API_VERSION}+csv`
+      },
+      responseType: 'text',
+      transformResponse: [(data) => data] // نمنع axios يحاول يحوّلها JSON
+    })
+  );
   return res.data; // نص CSV خام
 }
 
