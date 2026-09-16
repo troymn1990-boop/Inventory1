@@ -33,6 +33,7 @@ async function importOffersFromBol(accountId) {
   const errors = [];
 
   const findOfferByEanAndAccount = db.prepare('SELECT * FROM product_offers WHERE ean = ? AND account_id = ?');
+  const findAnyOfferByEan = db.prepare('SELECT * FROM product_offers WHERE ean = ? LIMIT 1');
   const findProductBySku = db.prepare('SELECT * FROM products WHERE sku = ?');
   const updateOfferStmt = db.prepare(
     `UPDATE product_offers SET bol_offer_id = ?, sell_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`
@@ -65,14 +66,29 @@ async function importOffersFromBol(accountId) {
           continue;
         }
 
-        // مفيش عرض بنفس الـ EAN على الحساب ده - نشوف هل الـ SKU بتاعه بيطابق منتج أساسي موجود
+        // نفس الـ EAN ده مرتبط بمنتج عندنا بالفعل تحت حساب تاني (نفس القطعة الفعلية بتتباع من حسابين)
+        // -> نربطه بنفس المنتج الموجود، مش نعمل واحد جديد
+        const sameEanOtherAccount = findAnyOfferByEan.get(ean);
+        if (sameEanOtherAccount) {
+          insertOfferStmt.run(sameEanOtherAccount.product_id, accountId, ean, offerId, sku, sellPrice);
+          offersAddedToExisting++;
+          continue;
+        }
+
+        // مفيش عرض بنفس الـ EAN خالص - نشوف هل الـ SKU (referenceCode) بيطابق منتج أساسي موجود
         let product = sku ? findProductBySku.get(sku) : null;
+
+        // احتياطي: هل اسم SKU الافتراضي بتاعنا (bol-<ean>) مستخدم من قبل؟ (يحصل لو نفس EAN
+        // اتجاب قبل كده من غير referenceCode وعمل منتج مستقل بنفس الاسم الاحتياطي ده)
+        const finalSku = sku || `bol-${ean}`;
+        if (!product) {
+          product = findProductBySku.get(finalSku);
+        }
 
         if (product) {
           insertOfferStmt.run(product.id, accountId, ean, offerId, sku, sellPrice);
           offersAddedToExisting++;
         } else {
-          const finalSku = sku || `bol-${ean}`;
           const tempName = `(بدون اسم - عدّله) ${sku || ean}`;
           try {
             const info = insertProductStmt.run(finalSku, tempName, stockQty);
