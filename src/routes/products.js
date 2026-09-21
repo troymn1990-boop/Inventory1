@@ -190,6 +190,29 @@ router.delete('/:id/offers/:offerId', (req, res) => {
   res.json({ ok: true });
 });
 
+// نقل EAN (عرض) من منتجه الأساسي الحالي لمنتج أساسي تاني - بالـ SKU بتاع المنتج الهدف
+router.post('/:id/offers/:offerId/move', (req, res) => {
+  const { targetSku } = req.body;
+  if (!targetSku) return res.status(400).json({ error: 'اكتب SKU المنتج اللي عايز تنقل الـ EAN ليه' });
+
+  const offer = db.prepare('SELECT * FROM product_offers WHERE id = ? AND product_id = ?').get(req.params.offerId, req.params.id);
+  if (!offer) return res.status(404).json({ error: 'الـ EAN مش موجود' });
+
+  const targetProduct = db.prepare('SELECT * FROM products WHERE sku = ?').get(targetSku.trim());
+  if (!targetProduct) return res.status(404).json({ error: `مفيش منتج بالـ SKU: ${targetSku}` });
+
+  if (targetProduct.id === Number(req.params.id)) {
+    return res.status(400).json({ error: 'الـ EAN ده أصلاً جوه المنتج ده' });
+  }
+
+  db.prepare('UPDATE product_offers SET product_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+    targetProduct.id,
+    req.params.offerId
+  );
+
+  res.json({ ok: true, movedTo: { id: targetProduct.id, sku: targetProduct.sku, name: targetProduct.name } });
+});
+
 // ================= مزامنة مع bol.com =================
 
 // مزامنة منتج واحد فوريًا مع bol.com (بيبعت السعر والمخزون والـ SKU لكل EAN مرتبط بيه)

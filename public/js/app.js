@@ -288,7 +288,10 @@ async function loadOffers() {
       <td><input type="text" value="${o.reference || ''}" onchange="updateOfferField(${o.id}, 'reference', this.value)" style="width:100px"></td>
       <td><input type="number" step="0.01" value="${o.sell_price}" onchange="updateOfferField(${o.id}, 'sell_price', this.value)" style="width:80px"></td>
       <td><input type="number" min="1" value="${o.units_per_sale || 1}" onchange="updateOfferField(${o.id}, 'units_per_sale', this.value)" style="width:60px"></td>
-      <td><button class="icon-btn" onclick="deleteOffer(${o.id})">🗑️</button></td>
+      <td>
+        <button class="icon-btn" onclick="moveOfferToProduct(${o.id})" title="نقل لمنتج تاني">➡️</button>
+        <button class="icon-btn" onclick="deleteOffer(${o.id})">🗑️</button>
+      </td>
     </tr>
   `).join('') || '<tr><td colspan="7">مفيش EANs مرتبطة لسه - ضيف واحد تحت</td></tr>';
 }
@@ -299,6 +302,25 @@ window.updateOfferField = async (offerId, field, value) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ [field]: value })
   });
+};
+
+window.moveOfferToProduct = async (offerId) => {
+  const targetSku = prompt('اكتب SKU المنتج الأساسي اللي عايز تنقل الـ EAN ده ليه:');
+  if (!targetSku) return;
+
+  try {
+    const res = await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetSku })
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'فشل النقل'); return; }
+    alert(`تم النقل لـ "${data.movedTo.name}" (${data.movedTo.sku}) ✅`);
+    loadOffers();
+  } catch (e) {
+    alert('مشكلة في الاتصال بالسيرفر');
+  }
 };
 
 window.deleteOffer = async (offerId) => {
