@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS product_offers (
   account_id INTEGER,                   -- أي حساب bol.com العرض ده تابع له
   ean TEXT,
   bol_offer_id TEXT,
+  units_per_sale INTEGER NOT NULL DEFAULT 1, -- كام قطعة بتتاخد من المخزون المشترك مع كل عملية بيع (مثلاً: طقم 10 = 10)
   reference TEXT,                       -- الـ SKU/reference الظاهر على bol.com للعرض ده تحديدًا
   sell_price REAL NOT NULL DEFAULT 0,
   active INTEGER NOT NULL DEFAULT 1,
@@ -142,6 +143,16 @@ function migrateImageUrlColumnIfNeeded() {
   }
 }
 migrateImageUrlColumnIfNeeded();
+
+// ---------- ترحيل: إضافة عمود units_per_sale لو الجدول كان موجود من قبل بدونه ----------
+function migrateUnitsPerSaleColumnIfNeeded() {
+  const columns = db.prepare("PRAGMA table_info(product_offers)").all().map((c) => c.name);
+  if (!columns.includes('units_per_sale')) {
+    db.exec("ALTER TABLE product_offers ADD COLUMN units_per_sale INTEGER NOT NULL DEFAULT 1");
+    console.log('[ترحيل] تم إضافة عمود units_per_sale لجدول product_offers');
+  }
+}
+migrateUnitsPerSaleColumnIfNeeded();
 
 // ---------- ترحيل: لو فيه حساب bol.com قديم متسجل في متغيرات البيئة، نحوّله لحساب في الجدول ----------
 function ensureDefaultAccountFromEnv() {

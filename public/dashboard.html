@@ -136,7 +136,7 @@
   <div class="modal-box offers-modal-box">
     <h3 id="offersModalTitle">EANs المرتبطة بـ ...</h3>
     <table id="offersTable">
-      <thead><tr><th>الحساب</th><th>الباركود (EAN)</th><th>Offer ID</th><th>Reference (SKU على bol)</th><th>سعر البيع</th><th></th></tr></thead>
+      <thead><tr><th>الحساب</th><th>الباركود (EAN)</th><th>Offer ID</th><th>Reference (SKU على bol)</th><th>سعر البيع</th><th>قطع/عملية بيع</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
     <h4>إضافة EAN جديد</h4>
@@ -146,6 +146,7 @@
       <label>Offer ID على bol.com</label><input type="text" id="o_offer">
       <label>Reference (SKU الظاهر على bol.com)</label><input type="text" id="o_reference">
       <label>سعر البيع</label><input type="number" step="0.01" id="o_price" required>
+      <label>عدد القطع من المخزون لكل عملية بيع (طقم/مجموعة = أكتر من 1)</label><input type="number" id="o_units" value="1" min="1" required>
       <div class="modal-actions">
         <button type="button" id="closeOffersModalBtn" class="btn-secondary">قفل</button>
         <button type="submit" class="btn-primary">إضافة EAN</button>

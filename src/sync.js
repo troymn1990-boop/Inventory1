@@ -61,12 +61,18 @@ async function runSync() {
             const product = db.prepare('SELECT * FROM products WHERE id = ?').get(offer.product_id);
             if (!product) continue;
 
+            // كل عملية بيع من العرض ده بتاخد units_per_sale قطعة من المخزون المشترك
+            // (مثلاً: عرض "طقم 10" بياخد 10 قطع مع كل عملية بيع، مش قطعة واحدة)
+            const unitsPerSale = offer.units_per_sale || 1;
+            const totalUnitsDeducted = quantity * unitsPerSale;
+            const trueCostPrice = product.cost_price * unitsPerSale;
+
             db.prepare(
               `INSERT INTO sales (product_id, offer_id, bol_order_id, bol_order_item_id, quantity, sale_price, cost_price, source)
                VALUES (?, ?, ?, ?, ?, ?, ?, 'bol')`
-            ).run(product.id, offer.id, orderSummary.orderId, orderItemId, quantity, unitPrice, product.cost_price);
+            ).run(product.id, offer.id, orderSummary.orderId, orderItemId, quantity, unitPrice, trueCostPrice);
 
-            const newStock = Math.max(0, product.stock_qty - quantity);
+            const newStock = Math.max(0, product.stock_qty - totalUnitsDeducted);
             db.prepare('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
               newStock,
               product.id
@@ -105,7 +111,9 @@ async function runSync() {
           continue;
         }
         try {
-          await bol.updateOfferStock(account, offer.bol_offer_id, product.stock_qty);
+          const unitsPerSale = offer.units_per_sale || 1;
+          const availableForThisOffer = Math.floor(product.stock_qty / unitsPerSale);
+          await bol.updateOfferStock(account, offer.bol_offer_id, availableForThisOffer);
           stockPushed++;
         } catch (e) {
           errors.push(

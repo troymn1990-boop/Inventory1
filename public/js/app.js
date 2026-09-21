@@ -287,9 +287,10 @@ async function loadOffers() {
       <td><input type="text" value="${o.bol_offer_id || ''}" onchange="updateOfferField(${o.id}, 'bol_offer_id', this.value)" style="width:110px"></td>
       <td><input type="text" value="${o.reference || ''}" onchange="updateOfferField(${o.id}, 'reference', this.value)" style="width:100px"></td>
       <td><input type="number" step="0.01" value="${o.sell_price}" onchange="updateOfferField(${o.id}, 'sell_price', this.value)" style="width:80px"></td>
+      <td><input type="number" min="1" value="${o.units_per_sale || 1}" onchange="updateOfferField(${o.id}, 'units_per_sale', this.value)" style="width:60px"></td>
       <td><button class="icon-btn" onclick="deleteOffer(${o.id})">🗑️</button></td>
     </tr>
-  `).join('') || '<tr><td colspan="6">مفيش EANs مرتبطة لسه - ضيف واحد تحت</td></tr>';
+  `).join('') || '<tr><td colspan="7">مفيش EANs مرتبطة لسه - ضيف واحد تحت</td></tr>';
 }
 
 window.updateOfferField = async (offerId, field, value) => {
@@ -313,7 +314,8 @@ document.getElementById('offerForm').addEventListener('submit', async (e) => {
     ean: document.getElementById('o_ean').value,
     bol_offer_id: document.getElementById('o_offer').value,
     reference: document.getElementById('o_reference').value,
-    sell_price: document.getElementById('o_price').value
+    sell_price: document.getElementById('o_price').value,
+    units_per_sale: document.getElementById('o_units').value
   };
   const res = await fetch(`/api/products/${currentOffersProductId}/offers`, {
     method: 'POST',

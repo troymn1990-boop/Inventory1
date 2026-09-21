@@ -55,7 +55,9 @@ async function pushProductToBol(product) {
     }
 
     try {
-      await bol.updateOfferStock(account, offer.bol_offer_id, product.stock_qty);
+      const unitsPerSale = offer.units_per_sale || 1;
+      const availableForThisOffer = Math.floor(product.stock_qty / unitsPerSale);
+      await bol.updateOfferStock(account, offer.bol_offer_id, availableForThisOffer);
       offerResult.stock = 'تم ✅';
     } catch (e) {
       offerResult.stock = 'فشل ❌: ' + extractBolError(e);
