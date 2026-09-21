@@ -72,6 +72,7 @@ async function loadProducts() {
       <td><span class="badge">${p.offers_count} EAN</span></td>
       <td>
         <button class="icon-btn" onclick="openOffersModal(${p.id}, '${p.sku.replace(/'/g, "\\'")}')" title="إدارة الـ EANs المرتبطة">🔗</button>
+        <button class="icon-btn" onclick="mergeProductInto(${p.id}, '${p.sku.replace(/'/g, "\\'")}')" title="دمج الشجرة دي كاملة في منتج تاني">🔀</button>
         <button class="icon-btn" onclick="syncProductToBol(${p.id})" title="مزامنة مع bol.com">🔄</button>
         <button class="icon-btn" onclick="editProduct(${p.id})">✏️</button>
         <button class="icon-btn" onclick="deleteProduct(${p.id})">🗑️</button>
@@ -200,6 +201,30 @@ document.getElementById('saveImageUrlBtn').addEventListener('click', async () =>
 });
 
 let allProductsCache = [];
+window.mergeProductInto = async (productId, sku) => {
+  const targetSku = prompt(`دمج "${sku}" داخل منتج تاني - اكتب SKU المنتج الهدف:`);
+  if (!targetSku) return;
+
+  const unitsPerSaleInput = prompt(
+    'كام قطعة من المخزون بتتاخد مع كل عملية بيع من EANs المنتج ده؟\n(مثلاً: لو ده عرض "طقم 10" اكتب 10 - أو سيبه فاضي لو عايز تحافظ على القيم الحالية لكل EAN)'
+  );
+  const unitsPerSale = unitsPerSaleInput && unitsPerSaleInput.trim() ? Number(unitsPerSaleInput.trim()) : null;
+
+  try {
+    const res = await fetch(`/api/products/${productId}/merge-into`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetSku, unitsPerSale })
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'فشل الدمج'); return; }
+    alert(`تم! ${data.movedOffers} EAN اتنقلوا لـ "${data.targetProduct.name}" (${data.targetProduct.sku}) ✅\nالمنتج "${sku}" بقى فاضي، تقدر تمسحه دلوقتي لو حبيت.`);
+    loadProducts();
+  } catch (e) {
+    alert('مشكلة في الاتصال بالسيرفر');
+  }
+};
+
 window.editProduct = async (id) => {
   const res = await fetch('/api/products?search=&page=1&pageSize=1000');
   const data = await res.json();

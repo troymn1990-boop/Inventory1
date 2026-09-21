@@ -190,6 +190,47 @@ router.delete('/:id/offers/:offerId', (req, res) => {
   res.json({ ok: true });
 });
 
+// دمج منتج أساسي كامل (كل EANs بتاعته) جوه منتج أساسي تاني دفعة واحدة
+// مفيد لما يكون عندك شجرة منفصلة لعرض "طقم" وعايز تخليها تسحب من نفس مخزون الشجرة الرئيسية
+router.post('/:id/merge-into', (req, res) => {
+  const { targetSku, unitsPerSale } = req.body;
+  if (!targetSku) return res.status(400).json({ error: 'اكتب SKU المنتج اللي عايز تدمج فيه' });
+
+  const sourceProduct = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!sourceProduct) return res.status(404).json({ error: 'المنتج مش موجود' });
+
+  const targetProduct = db.prepare('SELECT * FROM products WHERE sku = ?').get(targetSku.trim());
+  if (!targetProduct) return res.status(404).json({ error: `مفيش منتج بالـ SKU: ${targetSku}` });
+
+  if (targetProduct.id === sourceProduct.id) {
+    return res.status(400).json({ error: 'مينفعش تدمج المنتج في نفسه' });
+  }
+
+  const offersCount = db.prepare('SELECT COUNT(*) as c FROM product_offers WHERE product_id = ?').get(sourceProduct.id).c;
+  if (offersCount === 0) {
+    return res.status(400).json({ error: 'المنتج ده مالوش أي EANs أصلًا عشان تدمجه' });
+  }
+
+  if (unitsPerSale) {
+    db.prepare('UPDATE product_offers SET product_id = ?, units_per_sale = ?, updated_at = CURRENT_TIMESTAMP WHERE product_id = ?').run(
+      targetProduct.id,
+      Number(unitsPerSale),
+      sourceProduct.id
+    );
+  } else {
+    db.prepare('UPDATE product_offers SET product_id = ?, updated_at = CURRENT_TIMESTAMP WHERE product_id = ?').run(
+      targetProduct.id,
+      sourceProduct.id
+    );
+  }
+
+  res.json({
+    ok: true,
+    movedOffers: offersCount,
+    targetProduct: { id: targetProduct.id, sku: targetProduct.sku, name: targetProduct.name }
+  });
+});
+
 // نقل EAN (عرض) من منتجه الأساسي الحالي لمنتج أساسي تاني - بالـ SKU بتاع المنتج الهدف
 router.post('/:id/offers/:offerId/move', (req, res) => {
   const { targetSku } = req.body;
