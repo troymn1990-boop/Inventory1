@@ -254,6 +254,45 @@ router.post('/:id/offers/:offerId/move', (req, res) => {
   res.json({ ok: true, movedTo: { id: targetProduct.id, sku: targetProduct.sku, name: targetProduct.name } });
 });
 
+// ================= مكونات إضافية (لعروض الكومبو زي "طباخ + 4 قناني غاز") =================
+
+router.get('/:id/offers/:offerId/components', (req, res) => {
+  const components = db
+    .prepare(
+      `SELECT c.*, p.sku as product_sku, p.name as product_name
+       FROM offer_components c JOIN products p ON p.id = c.product_id
+       WHERE c.offer_id = ?`
+    )
+    .all(req.params.offerId);
+  res.json({ components });
+});
+
+router.post('/:id/offers/:offerId/components', (req, res) => {
+  const { componentSku, quantity } = req.body;
+  if (!componentSku || !quantity) return res.status(400).json({ error: 'SKU المنتج والكمية مطلوبين' });
+
+  const offer = db.prepare('SELECT * FROM product_offers WHERE id = ? AND product_id = ?').get(req.params.offerId, req.params.id);
+  if (!offer) return res.status(404).json({ error: 'الـ EAN مش موجود' });
+
+  const componentProduct = db.prepare('SELECT * FROM products WHERE sku = ?').get(componentSku.trim());
+  if (!componentProduct) return res.status(404).json({ error: `مفيش منتج بالـ SKU: ${componentSku}` });
+
+  if (componentProduct.id === Number(req.params.id)) {
+    return res.status(400).json({ error: 'المنتج ده أصلاً المنتج الأساسي بتاع الـ EAN ده' });
+  }
+
+  const info = db
+    .prepare('INSERT INTO offer_components (offer_id, product_id, quantity) VALUES (?, ?, ?)')
+    .run(req.params.offerId, componentProduct.id, Number(quantity));
+
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+
+router.delete('/:id/offers/:offerId/components/:componentId', (req, res) => {
+  db.prepare('DELETE FROM offer_components WHERE id = ? AND offer_id = ?').run(req.params.componentId, req.params.offerId);
+  res.json({ ok: true });
+});
+
 // ================= مزامنة مع bol.com =================
 
 // مزامنة منتج واحد فوريًا مع bol.com (بيبعت السعر والمخزون والـ SKU لكل EAN مرتبط بيه)

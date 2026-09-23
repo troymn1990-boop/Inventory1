@@ -305,7 +305,15 @@ async function loadOffers() {
     '<option value="">بدون حساب</option>' +
     accounts.map(a => `<option value="${a.id}" ${a.id === selectedId ? 'selected' : ''}>${a.name}</option>`).join('');
 
-  document.querySelector('#offersTable tbody').innerHTML = offers.map(o => `
+  const offersWithComponents = await Promise.all(
+    offers.map(async (o) => {
+      const compRes = await fetch(`/api/products/${currentOffersProductId}/offers/${o.id}/components`);
+      const compData = await compRes.json();
+      return { ...o, components: compData.components || [] };
+    })
+  );
+
+  document.querySelector('#offersTable tbody').innerHTML = offersWithComponents.map(o => `
     <tr>
       <td><select onchange="updateOfferField(${o.id}, 'account_id', this.value)" style="width:110px">${accountOptions(o.account_id)}</select></td>
       <td><input type="text" value="${o.ean || ''}" onchange="updateOfferField(${o.id}, 'ean', this.value)" style="width:110px"></td>
@@ -314,12 +322,44 @@ async function loadOffers() {
       <td><input type="number" step="0.01" value="${o.sell_price}" onchange="updateOfferField(${o.id}, 'sell_price', this.value)" style="width:80px"></td>
       <td><input type="number" min="1" value="${o.units_per_sale || 1}" onchange="updateOfferField(${o.id}, 'units_per_sale', this.value)" style="width:60px"></td>
       <td>
+        ${o.components.length ? o.components.map(c => `${c.product_name} ×${c.quantity}`).join('<br>') : '-'}
+        <button class="icon-btn" onclick="manageOfferComponents(${o.id})" title="إدارة المكونات الإضافية (لعروض الكومبو)">🧩</button>
+      </td>
+      <td>
         <button class="icon-btn" onclick="moveOfferToProduct(${o.id})" title="نقل لمنتج تاني">➡️</button>
         <button class="icon-btn" onclick="deleteOffer(${o.id})">🗑️</button>
       </td>
     </tr>
-  `).join('') || '<tr><td colspan="7">مفيش EANs مرتبطة لسه - ضيف واحد تحت</td></tr>';
+  `).join('') || '<tr><td colspan="8">مفيش EANs مرتبطة لسه - ضيف واحد تحت</td></tr>';
 }
+
+window.manageOfferComponents = async (offerId) => {
+  const action = prompt('اكتب "1" لإضافة مكون جديد، أو "2" لمسح كل المكونات الإضافية بتاعة الـ EAN ده:');
+  if (action === '1') {
+    const componentSku = prompt('SKU المنتج الأساسي التاني اللي محتاج تسحب منه (مثلاً منتج قناني الغاز):');
+    if (!componentSku) return;
+    const quantity = prompt('كام قطعة منه بتتسحب مع كل عملية بيع من الـ EAN ده؟ (مثلاً: 4)');
+    if (!quantity) return;
+
+    const res = await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}/components`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ componentSku, quantity })
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'فشل الإضافة'); return; }
+    alert('تمت إضافة المكون ✅');
+    loadOffers();
+  } else if (action === '2') {
+    if (!confirm('متأكد إنك عايز تمسح كل المكونات الإضافية بتاعة الـ EAN ده؟')) return;
+    const compRes = await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}/components`);
+    const { components } = await compRes.json();
+    for (const c of components) {
+      await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}/components/${c.id}`, { method: 'DELETE' });
+    }
+    loadOffers();
+  }
+};
 
 window.updateOfferField = async (offerId, field, value) => {
   await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}`, {

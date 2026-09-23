@@ -56,7 +56,15 @@ async function pushProductToBol(product) {
 
     try {
       const unitsPerSale = offer.units_per_sale || 1;
-      const availableForThisOffer = Math.floor(product.stock_qty / unitsPerSale);
+      let availableForThisOffer = Math.floor(product.stock_qty / unitsPerSale);
+
+      const components = db.prepare('SELECT * FROM offer_components WHERE offer_id = ?').all(offer.id);
+      for (const comp of components) {
+        const compProduct = db.prepare('SELECT * FROM products WHERE id = ?').get(comp.product_id);
+        if (!compProduct) continue;
+        availableForThisOffer = Math.min(availableForThisOffer, Math.floor(compProduct.stock_qty / comp.quantity));
+      }
+
       await bol.updateOfferStock(account, offer.bol_offer_id, availableForThisOffer);
       offerResult.stock = 'تم ✅';
     } catch (e) {

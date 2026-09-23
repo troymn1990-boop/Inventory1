@@ -61,22 +61,37 @@ async function runSync() {
             const product = db.prepare('SELECT * FROM products WHERE id = ?').get(offer.product_id);
             if (!product) continue;
 
-            // كل عملية بيع من العرض ده بتاخد units_per_sale قطعة من المخزون المشترك
-            // (مثلاً: عرض "طقم 10" بياخد 10 قطع مع كل عملية بيع، مش قطعة واحدة)
+            // كل عملية بيع من العرض ده بتاخد units_per_sale قطعة من المخزون الأساسي المشترك
+            // + أي مكونات إضافية من منتجات تانية (لعروض الكومبو زي "طباخ + 4 قناني غاز")
             const unitsPerSale = offer.units_per_sale || 1;
             const totalUnitsDeducted = quantity * unitsPerSale;
-            const trueCostPrice = product.cost_price * unitsPerSale;
-
-            db.prepare(
-              `INSERT INTO sales (product_id, offer_id, bol_order_id, bol_order_item_id, quantity, sale_price, cost_price, source)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'bol')`
-            ).run(product.id, offer.id, orderSummary.orderId, orderItemId, quantity, unitPrice, trueCostPrice);
+            let trueCostPrice = product.cost_price * unitsPerSale;
 
             const newStock = Math.max(0, product.stock_qty - totalUnitsDeducted);
             db.prepare('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
               newStock,
               product.id
             );
+
+            const components = db.prepare('SELECT * FROM offer_components WHERE offer_id = ?').all(offer.id);
+            for (const comp of components) {
+              const compProduct = db.prepare('SELECT * FROM products WHERE id = ?').get(comp.product_id);
+              if (!compProduct) continue;
+
+              const compDeducted = quantity * comp.quantity;
+              trueCostPrice += compProduct.cost_price * comp.quantity;
+
+              const compNewStock = Math.max(0, compProduct.stock_qty - compDeducted);
+              db.prepare('UPDATE products SET stock_qty = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
+                compNewStock,
+                compProduct.id
+              );
+            }
+
+            db.prepare(
+              `INSERT INTO sales (product_id, offer_id, bol_order_id, bol_order_item_id, quantity, sale_price, cost_price, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'bol')`
+            ).run(product.id, offer.id, orderSummary.orderId, orderItemId, quantity, unitPrice, trueCostPrice);
 
             ordersProcessed++;
           }
@@ -112,7 +127,18 @@ async function runSync() {
         }
         try {
           const unitsPerSale = offer.units_per_sale || 1;
-          const availableForThisOffer = Math.floor(product.stock_qty / unitsPerSale);
+          let availableForThisOffer = Math.floor(product.stock_qty / unitsPerSale);
+
+          // لو العرض ده كومبو (زي "طباخ + 4 قناني غاز")، الكمية المتاحة الحقيقية
+          // هي أقل رقم بين المنتج الأساسي وكل المكونات الإضافية
+          const components = db.prepare('SELECT * FROM offer_components WHERE offer_id = ?').all(offer.id);
+          for (const comp of components) {
+            const compProduct = db.prepare('SELECT * FROM products WHERE id = ?').get(comp.product_id);
+            if (!compProduct) continue;
+            const compAvailable = Math.floor(compProduct.stock_qty / comp.quantity);
+            availableForThisOffer = Math.min(availableForThisOffer, compAvailable);
+          }
+
           await bol.updateOfferStock(account, offer.bol_offer_id, availableForThisOffer);
           stockPushed++;
         } catch (e) {

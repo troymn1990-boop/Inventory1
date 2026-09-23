@@ -88,7 +88,16 @@ CREATE TABLE IF NOT EXISTS sync_log (
   message TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_products_sku ON products(sku);
+CREATE TABLE IF NOT EXISTS offer_components (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  offer_id INTEGER NOT NULL,          -- العرض (الـ EAN) اللي محتاج مكونات من منتجات تانية
+  product_id INTEGER NOT NULL,        -- المنتج الأساسي التاني اللي بيتسحب منه
+  quantity INTEGER NOT NULL DEFAULT 1, -- كام قطعة منه بتتسحب مع كل عملية بيع
+  FOREIGN KEY (offer_id) REFERENCES product_offers(id) ON DELETE CASCADE,
+  FOREIGN KEY (product_id) REFERENCES products(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_components_offer ON offer_components(offer_id);
 CREATE INDEX IF NOT EXISTS idx_offers_ean ON product_offers(ean);
 CREATE INDEX IF NOT EXISTS idx_offers_product ON product_offers(product_id);
 CREATE INDEX IF NOT EXISTS idx_sales_sold_at ON sales(sold_at);
