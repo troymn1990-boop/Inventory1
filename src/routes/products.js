@@ -211,26 +211,36 @@ router.post('/:id/merge-into', (req, res) => {
   }
 
   const offersCount = db.prepare('SELECT COUNT(*) as c FROM product_offers WHERE product_id = ?').get(sourceProduct.id).c;
-  if (offersCount === 0) {
-    return res.status(400).json({ error: 'المنتج ده مالوش أي EANs أصلًا عشان تدمجه' });
+  const salesCount = db.prepare('SELECT COUNT(*) as c FROM sales WHERE product_id = ?').get(sourceProduct.id).c;
+  if (offersCount === 0 && salesCount === 0) {
+    return res.status(400).json({ error: 'المنتج ده مالوش أي EANs ولا مبيعات أصلًا عشان تدمجه' });
   }
 
-  if (unitsPerSale) {
-    db.prepare('UPDATE product_offers SET product_id = ?, units_per_sale = ?, updated_at = CURRENT_TIMESTAMP WHERE product_id = ?').run(
-      targetProduct.id,
-      Number(unitsPerSale),
-      sourceProduct.id
-    );
-  } else {
-    db.prepare('UPDATE product_offers SET product_id = ?, updated_at = CURRENT_TIMESTAMP WHERE product_id = ?').run(
-      targetProduct.id,
-      sourceProduct.id
-    );
+  if (offersCount > 0) {
+    if (unitsPerSale) {
+      db.prepare('UPDATE product_offers SET product_id = ?, units_per_sale = ?, updated_at = CURRENT_TIMESTAMP WHERE product_id = ?').run(
+        targetProduct.id,
+        Number(unitsPerSale),
+        sourceProduct.id
+      );
+    } else {
+      db.prepare('UPDATE product_offers SET product_id = ?, updated_at = CURRENT_TIMESTAMP WHERE product_id = ?').run(
+        targetProduct.id,
+        sourceProduct.id
+      );
+    }
+  }
+
+  // ننقل سجل المبيعات القديم كمان (لو موجود) عشان يفضل محسوب على تقارير الأرباح تحت المنتج الصح،
+  // وعشان المنتج المصدر يبقى فاضي بالكامل ويكون ممكن تمسحه بعد كده
+  if (salesCount > 0) {
+    db.prepare('UPDATE sales SET product_id = ? WHERE product_id = ?').run(targetProduct.id, sourceProduct.id);
   }
 
   res.json({
     ok: true,
     movedOffers: offersCount,
+    movedSales: salesCount,
     targetProduct: { id: targetProduct.id, sku: targetProduct.sku, name: targetProduct.name }
   });
 });
