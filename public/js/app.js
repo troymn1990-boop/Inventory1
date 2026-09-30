@@ -235,8 +235,14 @@ window.editProduct = async (id) => {
 
 window.deleteProduct = async (id) => {
   if (!confirm('متأكد إنك عايز تمسح المنتج الأساسي ده؟ هيتمسح معاه كل الـ EANs المرتبطة بيه.')) return;
-  await fetch('/api/products/' + id, { method: 'DELETE' });
-  loadProducts();
+  try {
+    const res = await fetch('/api/products/' + id, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) { alert('فشل الحذف: ' + (data.error || 'خطأ غير معروف')); return; }
+    loadProducts();
+  } catch (e) {
+    alert('مشكلة في الاتصال بالسيرفر');
+  }
 };
 
 document.getElementById('productForm').addEventListener('submit', async (e) => {

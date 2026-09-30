@@ -163,6 +163,33 @@ function migrateUnitsPerSaleColumnIfNeeded() {
 }
 migrateUnitsPerSaleColumnIfNeeded();
 
+// ---------- ترحيل: تصحيح علاقة offer_components عشان تمسح تلقائي مع المنتج (بدل ما تمنع حذفه) ----------
+function migrateOfferComponentsCascadeIfNeeded() {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='offer_components'").get();
+  if (!row) return; // الجدول لسه معمول أصلًا بالـ CASCADE الصح من CREATE TABLE فوق
+  if (row.sql && row.sql.includes('FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE')) return;
+
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    CREATE TABLE offer_components_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      offer_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY (offer_id) REFERENCES product_offers(id) ON DELETE CASCADE,
+      FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
+    );
+    INSERT INTO offer_components_new (id, offer_id, product_id, quantity)
+      SELECT id, offer_id, product_id, quantity FROM offer_components;
+    DROP TABLE offer_components;
+    ALTER TABLE offer_components_new RENAME TO offer_components;
+    CREATE INDEX IF NOT EXISTS idx_components_offer ON offer_components(offer_id);
+    PRAGMA foreign_keys = ON;
+  `);
+  console.log('[ترحيل] تم تحديث offer_components عشان يمسح تلقائي مع المنتج');
+}
+migrateOfferComponentsCascadeIfNeeded();
+
 // ---------- ترحيل: لو فيه حساب bol.com قديم متسجل في متغيرات البيئة، نحوّله لحساب في الجدول ----------
 function ensureDefaultAccountFromEnv() {
   const clientId = process.env.BOL_CLIENT_ID;

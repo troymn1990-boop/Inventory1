@@ -117,8 +117,12 @@ router.post('/:id/image', (req, res) => {
 });
 
 router.delete('/:id', (req, res) => {
-  db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id); // الـ offers بتتمسح تلقائيًا (ON DELETE CASCADE)
-  res.json({ ok: true });
+  try {
+    db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id); // الـ offers بتتمسح تلقائيًا (ON DELETE CASCADE)
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: 'تعذّر حذف المنتج: ' + e.message });
+  }
 });
 
 // ================= العروض/الـ EANs المرتبطة بمنتج معين =================
