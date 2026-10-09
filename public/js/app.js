@@ -218,7 +218,7 @@ window.mergeProductInto = async (productId, sku) => {
     });
     const data = await res.json();
     if (!res.ok) { alert(data.error || 'فشل الدمج'); return; }
-    alert(`تم! ${data.movedOffers} EAN اتنقلوا لـ "${data.targetProduct.name}" (${data.targetProduct.sku}) ✅\nالمنتج "${sku}" بقى فاضي، تقدر تمسحه دلوقتي لو حبيت.`);
+    alert(`تم! ${data.movedOffers} EAN اتنقلوا لـ "${data.targetProduct.name}" (${data.targetProduct.sku}) ✅\nواتغير الـ SKU بتاعهم لـ ${data.targetProduct.sku}، والمنتج "${sku}" اتمسح تلقائي.\nاضغط 🔄 على الشجرة لو عايز SKU الجديد يتبعت لـ bol.com.`);
     loadProducts();
   } catch (e) {
     alert('مشكلة في الاتصال بالسيرفر');
@@ -387,7 +387,7 @@ window.moveOfferToProduct = async (offerId) => {
     });
     const data = await res.json();
     if (!res.ok) { alert(data.error || 'فشل النقل'); return; }
-    alert(`تم النقل لـ "${data.movedTo.name}" (${data.movedTo.sku}) ✅`);
+    alert(`تم النقل لـ "${data.movedTo.name}" (${data.movedTo.sku}) ✅\nواتغير الـ SKU بتاع الـ EAN لـ ${data.movedTo.sku}.`);
     loadOffers();
   } catch (e) {
     alert('مشكلة في الاتصال بالسيرفر');
