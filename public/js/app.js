@@ -373,6 +373,8 @@ window.updateOfferField = async (offerId, field, value) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ [field]: value })
   });
+  // تغيير عدد القطع بيغيّر الـ SKU تلقائي، فنحدّث الجدول عشان يظهر الـ SKU الجديد
+  if (field === 'units_per_sale') loadOffers();
 };
 
 window.moveOfferToProduct = async (offerId) => {

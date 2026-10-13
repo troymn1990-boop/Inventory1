@@ -32,6 +32,13 @@ const imageUpload = multer({
 
 router.use(requireAuth);
 
+// الـ SKU التلقائي للـ EAN: SKU الشجرة + عدد القطع (مثلاً SPEZ001S + 4 = SPEZ001S4)
+// لو العرض قطعة واحدة بس، بياخد SKU الشجرة زي ما هو
+function autoReference(sku, units) {
+  const n = Number(units) || 1;
+  return n > 1 ? `${sku}${n}` : sku;
+}
+
 // ================= المنتجات الأساسية (الشجرة) =================
 
 // جلب المنتجات مع بحث وترقيم صفحات - البحث بيدوّر في اسم/SKU المنتج وكمان EAN أي عرض مرتبط بيه
@@ -141,8 +148,11 @@ router.get('/:id/offers', (req, res) => {
 
 router.post('/:id/offers', (req, res) => {
   const { ean, bol_offer_id, reference, sell_price, account_id, units_per_sale } = req.body;
-  const product = db.prepare('SELECT id FROM products WHERE id = ?').get(req.params.id);
+  const product = db.prepare('SELECT id, sku FROM products WHERE id = ?').get(req.params.id);
   if (!product) return res.status(404).json({ error: 'المنتج الأساسي مش موجود' });
+
+  // لو مكتبتش Reference بإيدك، بيتولد تلقائي: SKU الشجرة + عدد القطع
+  const finalReference = reference && String(reference).trim() ? String(reference).trim() : autoReference(product.sku, units_per_sale);
 
   const info = db
     .prepare(
@@ -154,19 +164,27 @@ router.post('/:id/offers', (req, res) => {
       account_id || null,
       ean || null,
       bol_offer_id || null,
-      reference || null,
+      finalReference,
       Number(sell_price) || 0,
       Number(units_per_sale) || 1
     );
 
-  res.json({ ok: true, id: info.lastInsertRowid });
+  res.json({ ok: true, id: info.lastInsertRowid, reference: finalReference });
 });
 
 router.put('/:id/offers/:offerId', (req, res) => {
   const current = db.prepare('SELECT * FROM product_offers WHERE id = ? AND product_id = ?').get(req.params.offerId, req.params.id);
   if (!current) return res.status(404).json({ error: 'الـ EAN مش موجود' });
 
-  const { ean, bol_offer_id, reference, sell_price, active, account_id, units_per_sale } = req.body;
+  const { ean, bol_offer_id, sell_price, active, account_id, units_per_sale } = req.body;
+  let { reference } = req.body;
+
+  // لو غيّرت عدد القطع ومغيّرتش الـ Reference بإيدك، الـ SKU بيتحدّث تلقائي
+  if (units_per_sale !== undefined && reference === undefined) {
+    const parent = db.prepare('SELECT sku FROM products WHERE id = ?').get(req.params.id);
+    if (parent) reference = autoReference(parent.sku, units_per_sale);
+  }
+
   db.prepare(
     `UPDATE product_offers SET
       ean = ?, bol_offer_id = ?, reference = ?, account_id = ?,
@@ -219,15 +237,19 @@ router.post('/:id/merge-into', (req, res) => {
   // كل الخطوات في transaction واحدة: لو أي خطوة فشلت، مفيش حاجة بتتغير
   const doMerge = db.transaction(() => {
     if (offersCount > 0) {
-      // الـ EANs المنقولة بتاخد SKU الشجرة الهدف تلقائيًا (reference)
+      // الـ EANs المنقولة بتاخد SKU الشجرة الهدف + عدد القطع (مثلاً SPEZ001S4) تلقائيًا
       if (unitsPerSale) {
         db.prepare(
           'UPDATE product_offers SET product_id = ?, reference = ?, units_per_sale = ?, updated_at = CURRENT_TIMESTAMP WHERE product_id = ?'
-        ).run(targetProduct.id, targetProduct.sku, Number(unitsPerSale), sourceProduct.id);
+        ).run(targetProduct.id, autoReference(targetProduct.sku, unitsPerSale), Number(unitsPerSale), sourceProduct.id);
       } else {
-        db.prepare(
-          'UPDATE product_offers SET product_id = ?, reference = ?, updated_at = CURRENT_TIMESTAMP WHERE product_id = ?'
-        ).run(targetProduct.id, targetProduct.sku, sourceProduct.id);
+        const srcOffers = db.prepare('SELECT id, units_per_sale FROM product_offers WHERE product_id = ?').all(sourceProduct.id);
+        const upd = db.prepare(
+          'UPDATE product_offers SET product_id = ?, reference = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+        );
+        for (const o of srcOffers) {
+          upd.run(targetProduct.id, autoReference(targetProduct.sku, o.units_per_sale), o.id);
+        }
       }
     }
 
@@ -276,7 +298,7 @@ router.post('/:id/offers/:offerId/move', (req, res) => {
   // الـ EAN المنقول بياخد SKU الشجرة الهدف تلقائيًا
   db.prepare('UPDATE product_offers SET product_id = ?, reference = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(
     targetProduct.id,
-    targetProduct.sku,
+    autoReference(targetProduct.sku, offer.units_per_sale),
     req.params.offerId
   );
 
