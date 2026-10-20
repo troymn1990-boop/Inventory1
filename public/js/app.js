@@ -305,6 +305,17 @@ document.getElementById('productForm').addEventListener('submit', async (e) => {
     document.getElementById('f_sku').disabled = true;
     document.getElementById('modalTitle').textContent = 'تم الحفظ! تقدر تضيف صورة دلوقتي';
     document.getElementById('imageSection').style.display = 'block';
+    if (data.adopted > 0) {
+      alert(
+        `تم! ${data.adopted} EAN اتضموا للشجرة الجديدة تلقائي.` +
+        (data.adoptedGas > 0
+          ? `\n${data.adoptedGas} منهم عروض طباخ + قناني، اتوحّد الـ SKU بتاعها واتربط ${data.gasLinked} منها بشجرة القناني (${data.gasTreeSku}).`
+          : '') +
+        (data.adoptedWithSuffix > 0
+          ? `\n${data.adoptedWithSuffix} منهم الـ SKU بتاعه فيه حروف زيادة بعد SKU الشجرة (غالباً عروض كومبو مع قناني) - افتح 🔗 واربطهم بشجرة القناني بزرار 🧩.`
+          : '')
+      );
+    }
     loadProducts();
     return;
   }
@@ -511,6 +522,24 @@ window.syncProductToBol = async (id) => {
     alert('مشكلة في الاتصال بالسيرفر');
   }
 };
+
+// ---- توحيد SKUs الكومبو (طباخ + قناني) ----
+document.getElementById('convertGassBtn').addEventListener('click', async () => {
+  if (!confirm('هيدوّر على كل العروض اللي الـ SKU بتاعها فيه GASS، ويقلب الصيغة القديمة (DGK10GASS1) للموحدة (DGK1GASS10)، وينقلها لشجرة الطباخ ويربطها بشجرة القناني.\nشجرة الطباخ لازم تكون متعملة قبل كده (مثلاً DGK1). نكمّل؟')) return;
+  try {
+    const res = await fetch('/api/products/convert-gass-skus', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'فشل التحويل'); return; }
+    let msg = `تم! لقينا ${data.found} عرض فيه GASS:\n- SKU اتقلب: ${data.converted}\n- اتنقل لشجرة الطباخ: ${data.moved}\n- اتربط بشجرة القناني (${data.gasTreeSku}): ${data.linked}`;
+    if (data.gasMissing) msg += `\n⚠️ شجرة القناني ${data.gasTreeSku} مش موجودة - بعض العروض ما اتربطتش بيها.`;
+    if (data.skippedCount) msg += `\n\nاتخطّينا ${data.skippedCount} عرض:\n` + data.skipped.join('\n');
+    msg += '\n\nدوس 🔄 "مزامنة الكل" عشان الـ SKUs الجديدة تتبعت لـ bol.com.';
+    alert(msg);
+    loadProducts();
+  } catch (e) {
+    alert('مشكلة في الاتصال بالسيرفر');
+  }
+});
 
 // ---- مزامنة جماعية مع bol.com ----
 let pushAllInterval = null;

@@ -39,6 +39,20 @@ function autoReference(sku, units) {
   return n > 1 ? `${sku}${n}` : sku;
 }
 
+// عروض الكومبو (طباخ + قناني): الصيغة الموحدة = SKU الطباخ + GASS + عدد القناني (مثلاً DGK1GASS10)
+// الصيغة القديمة كانت مقلوبة: DGK + عدد القناني + GASS + موديل الطباخ (مثلاً DGK10GASS1)
+const GAS_TREE_SKU = process.env.GAS_TREE_SKU || 'BUT227S1';
+const GASS_REGEX = /^([A-Za-z]+)(\d+)GASS(\d+)$/i;
+
+// بيربط العرض بشجرة القناني: كل بيعة بتسحب cans قناني
+function linkGasComponent(offerId, cans) {
+  const gas = db.prepare('SELECT id FROM products WHERE sku = ?').get(GAS_TREE_SKU);
+  if (!gas) return false;
+  db.prepare('DELETE FROM offer_components WHERE offer_id = ? AND product_id = ?').run(offerId, gas.id);
+  db.prepare('INSERT INTO offer_components (offer_id, product_id, quantity) VALUES (?, ?, ?)').run(offerId, gas.id, cans);
+  return true;
+}
+
 // ================= المنتجات الأساسية (الشجرة) =================
 
 // جلب المنتجات مع بحث وترقيم صفحات - البحث بيدوّر في اسم/SKU المنتج وكمان EAN أي عرض مرتبط بيه
@@ -85,7 +99,73 @@ router.post('/', (req, res) => {
         category || null,
         image_url || null
       );
-    res.json({ ok: true, id: info.lastInsertRowid });
+    const newId = info.lastInsertRowid;
+
+    // ضم تلقائي: أي EAN الـ SKU (reference) بتاعه بيبدأ بـ SKU الشجرة الجديدة، بشرط إن الحرف اللي بعده مش رقم
+    // (عشان DGK1 ميمسكش DGK10 أو DGK12). والعروض اللي جوه شجرة SKU بتاعها مطابق تماماً للـ reference مش بتتحرك.
+    let adopted = 0;
+    let adoptedWithSuffix = 0;
+    let adoptedGas = 0;
+    let gasLinked = 0;
+    const candidates = db
+      .prepare(
+        `SELECT o.id, o.reference, o.product_id, p.sku AS parent_sku, p.name AS parent_name
+         FROM product_offers o JOIN products p ON p.id = o.product_id
+         WHERE o.product_id != ? AND o.reference IS NOT NULL
+           AND (o.reference LIKE ? ESCAPE '\\' OR o.reference LIKE '%GASS%')`
+      )
+      .all(newId, String(sku).replace(/[\\%_]/g, '\\$&') + '%');
+
+    const touchedParents = new Set();
+    const moveOffer = db.prepare('UPDATE product_offers SET product_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+    db.transaction(() => {
+      for (const c of candidates) {
+        if (c.parent_sku === c.reference) continue; // شجرة تانية بنفس الـ SKU بالظبط
+
+        // عروض الكومبو بالصيغة القديمة (DGK10GASS1) أو الجديدة (DGK1GASS10)
+        const m = GASS_REGEX.exec(c.reference);
+        if (m) {
+          const [, letters, first, second] = m;
+          let newRef = null;
+          let cans = null;
+          if (letters + second === sku && letters + first !== sku) {
+            newRef = `${letters}${second}GASS${first}`; // قديمة -> نقلبها
+            cans = Number(first);
+          } else if (letters + first === sku) {
+            newRef = c.reference; // جديدة بالفعل
+            cans = Number(second);
+          }
+          if (newRef) {
+            db.prepare('UPDATE product_offers SET product_id = ?, reference = ?, units_per_sale = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newId, newRef, c.id);
+            touchedParents.add(c.product_id);
+            adopted++;
+            adoptedGas++;
+            if (linkGasComponent(c.id, cans)) gasLinked++;
+            continue;
+          }
+        }
+
+        if (!c.reference.startsWith(sku)) continue; // LIKE مش حساس لحالة الأحرف
+        const rest = c.reference.slice(sku.length);
+        if (/^\d/.test(rest)) continue; // الحرف اللي بعد الـ SKU رقم -> موديل تاني
+        moveOffer.run(newId, c.id);
+        touchedParents.add(c.product_id);
+        adopted++;
+        if (rest) adoptedWithSuffix++;
+      }
+
+      // الأشجار المؤقتة (اللي اتعملت من الاستيراد باسم "بدون اسم") اللي فضيت بعد النقل بتتمسح تلقائي
+      for (const pid of touchedParents) {
+        const left = db.prepare('SELECT COUNT(*) AS c FROM product_offers WHERE product_id = ?').get(pid).c;
+        const salesLeft = db.prepare('SELECT COUNT(*) AS c FROM sales WHERE product_id = ?').get(pid).c;
+        const parent = db.prepare('SELECT name FROM products WHERE id = ?').get(pid);
+        if (left === 0 && salesLeft === 0 && parent && parent.name.startsWith('(بدون اسم')) {
+          db.prepare('DELETE FROM products WHERE id = ?').run(pid);
+        }
+      }
+    })();
+
+    res.json({ ok: true, id: newId, adopted, adoptedWithSuffix, adoptedGas, gasLinked, gasTreeSku: GAS_TREE_SKU });
   } catch (e) {
     res.status(400).json({ error: 'SKU ده موجود قبل كده' });
   }
@@ -377,6 +457,58 @@ router.post('/:id/push-to-bol', async (req, res) => {
   } catch (e) {
     res.status(400).json({ ok: false, error: e.message });
   }
+});
+
+// تحويل كل عروض الكومبو (طباخ + قناني) الموجودة: يقلب الـ SKU القديم للصيغة الموحدة،
+// ينقل العرض لشجرة الطباخ، ويربطه بشجرة القناني بالعدد المناسب
+router.post('/convert-gass-skus', (req, res) => {
+  const findTree = db.prepare('SELECT id, sku, name FROM products WHERE sku = ?');
+  const offers = db
+    .prepare('SELECT id, product_id, reference FROM product_offers WHERE reference IS NOT NULL')
+    .all()
+    .filter((o) => GASS_REGEX.test(o.reference));
+
+  const stats = { found: offers.length, converted: 0, moved: 0, linked: 0, alreadyOk: 0 };
+  const skipped = [];
+  let gasMissing = false;
+  const touchedParents = new Set();
+
+  db.transaction(() => {
+    for (const o of offers) {
+      const [, letters, first, second] = GASS_REGEX.exec(o.reference);
+      const oldTree = findTree.get(letters + second); // DGK10GASS1 -> شجرة DGK1
+      const newTree = findTree.get(letters + first); // DGK1GASS10 -> شجرة DGK1
+      let tree, newRef, cans;
+
+      if (oldTree && newTree) { skipped.push(`${o.reference} (ملتبس: الشجرتين ${oldTree.sku} و ${newTree.sku} موجودين)`); continue; }
+      if (oldTree) { tree = oldTree; newRef = `${letters}${second}GASS${first}`; cans = Number(first); }
+      else if (newTree) { tree = newTree; newRef = o.reference; cans = Number(second); }
+      else { skipped.push(`${o.reference} (مفيش شجرة طباخ بـ SKU مناسب)`); continue; }
+
+      if (tree.sku === GAS_TREE_SKU) { skipped.push(`${o.reference} (الشجرة هي شجرة القناني نفسها)`); continue; }
+
+      const changedRef = newRef !== o.reference;
+      const changedTree = o.product_id !== tree.id;
+      db.prepare('UPDATE product_offers SET product_id = ?, reference = ?, units_per_sale = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(tree.id, newRef, o.id);
+      if (changedRef) stats.converted++;
+      if (changedTree) { stats.moved++; touchedParents.add(o.product_id); }
+      if (!changedRef && !changedTree) stats.alreadyOk++;
+      if (linkGasComponent(o.id, cans)) stats.linked++;
+      else gasMissing = true;
+    }
+
+    // الأشجار المؤقتة اللي فضيت بعد النقل بتتمسح تلقائي
+    for (const pid of touchedParents) {
+      const left = db.prepare('SELECT COUNT(*) AS c FROM product_offers WHERE product_id = ?').get(pid).c;
+      const salesLeft = db.prepare('SELECT COUNT(*) AS c FROM sales WHERE product_id = ?').get(pid).c;
+      const parent = db.prepare('SELECT name FROM products WHERE id = ?').get(pid);
+      if (left === 0 && salesLeft === 0 && parent && parent.name.startsWith('(بدون اسم')) {
+        db.prepare('DELETE FROM products WHERE id = ?').run(pid);
+      }
+    }
+  })();
+
+  res.json({ ok: true, ...stats, skipped: skipped.slice(0, 30), skippedCount: skipped.length, gasMissing, gasTreeSku: GAS_TREE_SKU });
 });
 
 // مزامنة كل المنتجات دفعة واحدة - شغالة في الخلفية
