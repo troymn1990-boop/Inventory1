@@ -117,11 +117,10 @@ router.post('/', (req, res) => {
       .all(newId, String(sku).replace(/[\\%_]/g, '\\$&') + '%');
 
     const touchedParents = new Set();
+    const mirrorParents = new Set();
     const moveOffer = db.prepare('UPDATE product_offers SET product_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
     db.transaction(() => {
       for (const c of candidates) {
-        if (c.parent_sku === c.reference) continue; // شجرة تانية بنفس الـ SKU بالظبط
-
         // عروض الكومبو بالصيغة القديمة (DGK10GASS1) أو الجديدة (DGK1GASS10)
         const m = GASS_REGEX.exec(c.reference);
         if (m) {
@@ -138,6 +137,8 @@ router.post('/', (req, res) => {
           if (newRef) {
             db.prepare('UPDATE product_offers SET product_id = ?, reference = ?, units_per_sale = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(newId, newRef, c.id);
             touchedParents.add(c.product_id);
+            // الشجرة اللي SKU بتاعها = الـ reference نفسه (نسخة من العرض ده بس) بتتمسح لو فضيت
+            if (c.parent_sku === c.reference) mirrorParents.add(c.product_id);
             adopted++;
             adoptedGas++;
             if (linkGasComponent(c.id, cans)) gasLinked++;
@@ -145,6 +146,7 @@ router.post('/', (req, res) => {
           }
         }
 
+        if (c.parent_sku === c.reference) continue; // شجرة تانية بنفس الـ SKU بالظبط (مش كومبو)
         if (!c.reference.startsWith(sku)) continue; // LIKE مش حساس لحالة الأحرف
         const rest = c.reference.slice(sku.length);
         if (/^\d/.test(rest)) continue; // الحرف اللي بعد الـ SKU رقم -> موديل تاني
@@ -159,7 +161,7 @@ router.post('/', (req, res) => {
         const left = db.prepare('SELECT COUNT(*) AS c FROM product_offers WHERE product_id = ?').get(pid).c;
         const salesLeft = db.prepare('SELECT COUNT(*) AS c FROM sales WHERE product_id = ?').get(pid).c;
         const parent = db.prepare('SELECT name FROM products WHERE id = ?').get(pid);
-        if (left === 0 && salesLeft === 0 && parent && parent.name.startsWith('(بدون اسم')) {
+        if (left === 0 && salesLeft === 0 && parent && (parent.name.startsWith('(بدون اسم') || mirrorParents.has(pid))) {
           db.prepare('DELETE FROM products WHERE id = ?').run(pid);
         }
       }
@@ -293,19 +295,34 @@ router.post('/:id/normalize-references', (req, res) => {
   if (!product) return res.status(404).json({ error: 'المنتج الأساسي مش موجود' });
 
   const offers = db.prepare('SELECT id, reference, units_per_sale FROM product_offers WHERE product_id = ?').all(product.id);
-  const upd = db.prepare('UPDATE product_offers SET reference = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+  const upd = db.prepare('UPDATE product_offers SET reference = ?, units_per_sale = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+  const gas = db.prepare('SELECT id FROM products WHERE sku = ?').get(GAS_TREE_SKU);
+  const gasComp = db.prepare('SELECT quantity FROM offer_components WHERE offer_id = ? AND product_id = ?');
   let changed = 0;
+  let combos = 0;
+  let unitsReset = 0;
   db.transaction(() => {
     for (const o of offers) {
-      const newRef = autoReference(product.sku, o.units_per_sale);
-      if (o.reference !== newRef) {
-        upd.run(newRef, o.id);
+      const comp = gas ? gasComp.get(o.id, gas.id) : null;
+      let newRef, newUnits;
+      if (comp) {
+        // عرض كومبو (طباخ + قناني): SKU الشجرة + GASS + عدد القناني، وقطعة طباخ واحدة بس لكل بيعة
+        newRef = `${product.sku}GASS${comp.quantity}`;
+        newUnits = 1;
+        combos++;
+        if ((o.units_per_sale || 1) !== 1) unitsReset++;
+      } else {
+        newRef = autoReference(product.sku, o.units_per_sale);
+        newUnits = o.units_per_sale || 1;
+      }
+      if (o.reference !== newRef || (o.units_per_sale || 1) !== newUnits) {
+        upd.run(newRef, newUnits, o.id);
         changed++;
       }
     }
   })();
 
-  res.json({ ok: true, total: offers.length, changed });
+  res.json({ ok: true, total: offers.length, changed, combos, unitsReset });
 });
 
 router.delete('/:id/offers/:offerId', (req, res) => {
@@ -472,6 +489,7 @@ router.post('/convert-gass-skus', (req, res) => {
   const skipped = [];
   let gasMissing = false;
   const touchedParents = new Set();
+  const mirrorParents = new Set();
 
   db.transaction(() => {
     for (const o of offers) {
@@ -491,7 +509,12 @@ router.post('/convert-gass-skus', (req, res) => {
       const changedTree = o.product_id !== tree.id;
       db.prepare('UPDATE product_offers SET product_id = ?, reference = ?, units_per_sale = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(tree.id, newRef, o.id);
       if (changedRef) stats.converted++;
-      if (changedTree) { stats.moved++; touchedParents.add(o.product_id); }
+      if (changedTree) {
+        stats.moved++;
+        touchedParents.add(o.product_id);
+        const src = db.prepare('SELECT sku FROM products WHERE id = ?').get(o.product_id);
+        if (src && src.sku === o.reference) mirrorParents.add(o.product_id); // شجرة نسخة من العرض ده بس
+      }
       if (!changedRef && !changedTree) stats.alreadyOk++;
       if (linkGasComponent(o.id, cans)) stats.linked++;
       else gasMissing = true;
@@ -502,7 +525,7 @@ router.post('/convert-gass-skus', (req, res) => {
       const left = db.prepare('SELECT COUNT(*) AS c FROM product_offers WHERE product_id = ?').get(pid).c;
       const salesLeft = db.prepare('SELECT COUNT(*) AS c FROM sales WHERE product_id = ?').get(pid).c;
       const parent = db.prepare('SELECT name FROM products WHERE id = ?').get(pid);
-      if (left === 0 && salesLeft === 0 && parent && parent.name.startsWith('(بدون اسم')) {
+      if (left === 0 && salesLeft === 0 && parent && (parent.name.startsWith('(بدون اسم') || mirrorParents.has(pid))) {
         db.prepare('DELETE FROM products WHERE id = ?').run(pid);
       }
     }

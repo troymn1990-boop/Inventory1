@@ -342,7 +342,12 @@ document.getElementById('normalizeRefsBtn').addEventListener('click', async () =
     const res = await fetch(`/api/products/${currentOffersProductId}/normalize-references`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) { alert(data.error || 'فشل التوحيد'); return; }
-    alert(`تم! اتغيّر الـ SKU لـ ${data.changed} من ${data.total} EAN ✅\nدوس 🔄 على الشجرة عشان الـ SKU الجديد يتبعت لـ bol.com.`);
+    alert(
+      `تم! اتغيّر الـ SKU لـ ${data.changed} من ${data.total} EAN ✅` +
+      (data.combos ? `\n${data.combos} منهم عروض طباخ + قناني (SKU بصيغة ...GASS + عدد القناني).` : '') +
+      (data.unitsReset ? `\n⚠️ ${data.unitsReset} عرض كومبو كان عدد قطعه أكتر من 1، ورجّعته 1 عشان القناني بتتخصم من شجرتها مش من الطباخات.` : '') +
+      '\nدوس 🔄 على الشجرة عشان الـ SKU الجديد يتبعت لـ bol.com.'
+    );
     loadOffers();
   } catch (e) {
     alert('مشكلة في الاتصال بالسيرفر');
