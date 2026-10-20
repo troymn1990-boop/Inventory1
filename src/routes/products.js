@@ -207,6 +207,27 @@ router.put('/:id/offers/:offerId', (req, res) => {
   res.json({ ok: true });
 });
 
+// توحيد الـ SKU لكل EANs الشجرة: كل واحد بيبقى SKU الشجرة + عدد القطع (SPEZ001S، SPEZ001S4، SPEZ001S10...)
+router.post('/:id/normalize-references', (req, res) => {
+  const product = db.prepare('SELECT id, sku FROM products WHERE id = ?').get(req.params.id);
+  if (!product) return res.status(404).json({ error: 'المنتج الأساسي مش موجود' });
+
+  const offers = db.prepare('SELECT id, reference, units_per_sale FROM product_offers WHERE product_id = ?').all(product.id);
+  const upd = db.prepare('UPDATE product_offers SET reference = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+  let changed = 0;
+  db.transaction(() => {
+    for (const o of offers) {
+      const newRef = autoReference(product.sku, o.units_per_sale);
+      if (o.reference !== newRef) {
+        upd.run(newRef, o.id);
+        changed++;
+      }
+    }
+  })();
+
+  res.json({ ok: true, total: offers.length, changed });
+});
+
 router.delete('/:id/offers/:offerId', (req, res) => {
   db.prepare('DELETE FROM product_offers WHERE id = ? AND product_id = ?').run(req.params.offerId, req.params.id);
   res.json({ ok: true });

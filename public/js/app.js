@@ -30,6 +30,42 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 const money = (n) => (Number(n) || 0).toLocaleString('ar-EG', { style: 'currency', currency: 'EUR' });
 
+// ================= تنبيه المخزون الناقص (شريط أحمر أعلى الصفحة) =================
+const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+let lowStockBannerDismissed = false;
+
+async function loadLowStockBanner() {
+  const banner = document.getElementById('lowStockBanner');
+  if (!banner) return;
+  try {
+    const res = await fetch('/api/reports/inventory-summary');
+    if (!res.ok) return;
+    const { lowStock } = await res.json();
+    if (!lowStock || !lowStock.length || lowStockBannerDismissed) {
+      banner.style.display = 'none';
+      return;
+    }
+    const countLabel = lowStock.length >= 20 ? '20+' : lowStock.length;
+    banner.innerHTML = `
+      <div style="background:#fdecea;border:2px solid #d93025;color:#8a1c13;border-radius:10px;margin:12px 16px;padding:12px 16px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+          <strong>⚠️ تنبيه: ${countLabel} منتج وصل لحد التنبيه أو أقل</strong>
+          <button id="dismissLowStockBtn" style="background:none;border:none;color:#8a1c13;font-size:20px;cursor:pointer;" title="إخفاء">✖</button>
+        </div>
+        <ul style="margin:8px 0 0;padding-right:20px;">
+          ${lowStock.map(p => `<li><strong>${escapeHtml(p.sku)}</strong> - ${escapeHtml(p.name)}: باقي <strong>${p.stock_qty}</strong> (الحد ${p.low_stock_threshold})</li>`).join('')}
+        </ul>
+      </div>`;
+    banner.style.display = 'block';
+    document.getElementById('dismissLowStockBtn').addEventListener('click', () => {
+      lowStockBannerDismissed = true;
+      banner.style.display = 'none';
+    });
+  } catch (e) {
+    // التنبيه مش حرج - لو فشل منكسرش باقي الصفحة
+  }
+}
+
 // ================= نظرة عامة =================
 async function loadOverview() {
   const res = await fetch('/api/reports/inventory-summary');
@@ -288,6 +324,19 @@ window.openOffersModal = async (productId, sku) => {
   await loadOffers();
   offersModal.classList.remove('hidden');
 };
+
+document.getElementById('normalizeRefsBtn').addEventListener('click', async () => {
+  if (!confirm('هيتغيّر الـ SKU لكل الـ EANs في الشجرة دي لـ: SKU الشجرة + عدد القطع (حسب خانة "قطع/عملية بيع").\nتأكد الأول إن عدد القطع صح لكل EAN. نكمّل؟')) return;
+  try {
+    const res = await fetch(`/api/products/${currentOffersProductId}/normalize-references`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'فشل التوحيد'); return; }
+    alert(`تم! اتغيّر الـ SKU لـ ${data.changed} من ${data.total} EAN ✅\nدوس 🔄 على الشجرة عشان الـ SKU الجديد يتبعت لـ bol.com.`);
+    loadOffers();
+  } catch (e) {
+    alert('مشكلة في الاتصال بالسيرفر');
+  }
+});
 
 document.getElementById('closeOffersModalBtn').addEventListener('click', () => {
   offersModal.classList.add('hidden');
@@ -712,3 +761,4 @@ document.getElementById('accountForm').addEventListener('submit', async (e) => {
 
 // تحميل أولي
 loadOverview();
+loadLowStockBanner();
