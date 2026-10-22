@@ -394,7 +394,26 @@ router.post('/:id/merge-into', (req, res) => {
   const doMerge = db.transaction(() => {
     if (offersCount > 0) {
       // الـ EANs المنقولة بتاخد SKU الشجرة الهدف + عدد القطع (مثلاً SPEZ001S4) تلقائيًا
-      if (unitsPerSale) {
+      const gasCans = Number(req.body.gasCans) > 0 ? Number(req.body.gasCans) : null;
+      const gasTree = db.prepare('SELECT id FROM products WHERE sku = ?').get(GAS_TREE_SKU);
+      const srcAll = db.prepare('SELECT id, units_per_sale FROM product_offers WHERE product_id = ?').all(sourceProduct.id);
+      const existingGas = db.prepare('SELECT quantity FROM offer_components WHERE offer_id = ? AND product_id = ?');
+      if (gasCans || (gasTree && srcAll.some((o) => existingGas.get(o.id, gasTree.id)))) {
+        // عروض كومبو (طباخ + قناني): SKU = الطباخ + BUT227S + عدد القناني، وقطعة طباخ واحدة بس لكل بيعة
+        const updCombo = db.prepare(
+          'UPDATE product_offers SET product_id = ?, reference = ?, units_per_sale = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+        );
+        for (const o of srcAll) {
+          const comp = gasTree ? existingGas.get(o.id, gasTree.id) : null;
+          const cans = gasCans || (comp && comp.quantity);
+          if (cans) {
+            if (gasCans) linkGasComponent(o.id, gasCans);
+            updCombo.run(targetProduct.id, comboRef(targetProduct.sku, cans), 1, o.id);
+          } else {
+            updCombo.run(targetProduct.id, autoReference(targetProduct.sku, o.units_per_sale), o.units_per_sale || 1, o.id);
+          }
+        }
+      } else if (unitsPerSale) {
         db.prepare(
           'UPDATE product_offers SET product_id = ?, reference = ?, units_per_sale = ?, updated_at = CURRENT_TIMESTAMP WHERE product_id = ?'
         ).run(targetProduct.id, autoReference(targetProduct.sku, unitsPerSale), Number(unitsPerSale), sourceProduct.id);

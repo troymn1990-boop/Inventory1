@@ -241,16 +241,24 @@ window.mergeProductInto = async (productId, sku) => {
   const targetSku = prompt(`دمج "${sku}" داخل منتج تاني - اكتب SKU المنتج الهدف:`);
   if (!targetSku) return;
 
-  const unitsPerSaleInput = prompt(
-    'كام قطعة من المخزون بتتاخد مع كل عملية بيع من EANs المنتج ده؟\n(مثلاً: لو ده عرض "طقم 10" اكتب 10 - أو سيبه فاضي لو عايز تحافظ على القيم الحالية لكل EAN)'
+  const gasInput = prompt(
+    'لو ده عرض كومبو (طباخ + قناني غاز): اكتب عدد القناني مع كل طباخ (مثلاً 4) - هيتضاف مكوّن القناني لكل EANs ده والـ SKU يبقى مثلاً DGK1BUT227S4.\nلو مش كومبو سيبه فاضي واضغط موافق.'
   );
-  const unitsPerSale = unitsPerSaleInput && unitsPerSaleInput.trim() ? Number(unitsPerSaleInput.trim()) : null;
+  const gasCans = gasInput && gasInput.trim() ? Number(gasInput.trim()) : null;
+
+  let unitsPerSale = null;
+  if (!gasCans) {
+    const unitsPerSaleInput = prompt(
+      'كام قطعة من المخزون بتتاخد مع كل عملية بيع من EANs المنتج ده؟\n(مثلاً: لو ده عرض "طقم 10" اكتب 10 - أو سيبه فاضي لو عايز تحافظ على القيم الحالية لكل EAN)'
+    );
+    unitsPerSale = unitsPerSaleInput && unitsPerSaleInput.trim() ? Number(unitsPerSaleInput.trim()) : null;
+  }
 
   try {
     const res = await fetch(`/api/products/${productId}/merge-into`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ targetSku, unitsPerSale })
+      body: JSON.stringify({ targetSku, unitsPerSale, gasCans })
     });
     const data = await res.json();
     if (!res.ok) { alert(data.error || 'فشل الدمج'); return; }
