@@ -327,9 +327,21 @@ document.getElementById('productForm').addEventListener('submit', async (e) => {
 // ---- Modal إدارة الـ EANs المرتبطة بمنتج ----
 const offersModal = document.getElementById('offersModal');
 let currentOffersProductId = null;
+let currentOffersProductSku = '';
+// تعديلات الـ EANs اللي لسه ما اتحفظتش: { offerId: { field: value } } - بتتحفظ بس لما تدوس "حفظ"
+let pendingOffers = {};
+
+const hasPendingOffers = () => Object.keys(pendingOffers).length > 0;
+function refreshPendingNote() {
+  const el = document.getElementById('offersPendingNote');
+  if (el) el.textContent = hasPendingOffers() ? `⚠️ في تعديلات على ${Object.keys(pendingOffers).length} EAN لسه ما اتحفظتش - دوس "حفظ"` : '';
+}
 
 window.openOffersModal = async (productId, sku) => {
   currentOffersProductId = productId;
+  currentOffersProductSku = sku;
+  pendingOffers = {};
+  refreshPendingNote();
   document.getElementById('offersModalTitle').textContent = `EANs المرتبطة بـ ${sku}`;
   await populateAccountSelect(document.getElementById('o_account'));
   await loadOffers();
@@ -344,7 +356,7 @@ document.getElementById('normalizeRefsBtn').addEventListener('click', async () =
     if (!res.ok) { alert(data.error || 'فشل التوحيد'); return; }
     alert(
       `تم! اتغيّر الـ SKU لـ ${data.changed} من ${data.total} EAN ✅` +
-      (data.combos ? `\n${data.combos} منهم عروض طباخ + قناني (SKU بصيغة ...GASS + عدد القناني).` : '') +
+      (data.combos ? `\n${data.combos} منهم عروض طباخ + قناني (SKU بصيغة DGK1BUT227S4 = الطباخ + شجرة القناني + العدد).` : '') +
       (data.unitsReset ? `\n⚠️ ${data.unitsReset} عرض كومبو كان عدد قطعه أكتر من 1، ورجّعته 1 عشان القناني بتتخصم من شجرتها مش من الطباخات.` : '') +
       '\nدوس 🔄 على الشجرة عشان الـ SKU الجديد يتبعت لـ bol.com.'
     );
@@ -354,9 +366,50 @@ document.getElementById('normalizeRefsBtn').addEventListener('click', async () =
   }
 });
 
+// إلغاء: يقفل من غير ما يحفظ تعديلات الحقول
 document.getElementById('closeOffersModalBtn').addEventListener('click', () => {
+  if (hasPendingOffers() && !confirm('في تعديلات ما اتحفظتش، هتضيع لو قفلت. تقفل من غير حفظ؟')) return;
+  pendingOffers = {};
+  refreshPendingNote();
   offersModal.classList.add('hidden');
   loadProducts(); // نحدّث عدد الـ EANs في الجدول بعد القفل
+});
+
+// حفظ: يبعت كل التعديلات المتراكمة مرة واحدة ويقفل
+document.getElementById('saveOffersBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('saveOffersBtn');
+  const entries = Object.entries(pendingOffers);
+  if (!entries.length) {
+    offersModal.classList.add('hidden');
+    loadProducts();
+    return;
+  }
+  btn.disabled = true;
+  const failures = [];
+  for (const [offerId, fields] of entries) {
+    try {
+      const res = await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fields)
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        failures.push(`EAN #${offerId}: ${data.error || 'فشل الحفظ'}`);
+      }
+    } catch (e) {
+      failures.push(`EAN #${offerId}: مشكلة في الاتصال بالسيرفر`);
+    }
+  }
+  btn.disabled = false;
+  if (failures.length) {
+    alert('بعض التعديلات ما اتحفظتش:\n' + failures.join('\n'));
+    return;
+  }
+  pendingOffers = {};
+  refreshPendingNote();
+  offersModal.classList.add('hidden');
+  loadProducts();
 });
 
 async function populateAccountSelect(selectEl, selectedId = null) {
@@ -374,7 +427,10 @@ async function loadOffers() {
   const { accounts } = await accountsRes.json();
   const accountOptions = (selectedId) =>
     '<option value="">بدون حساب</option>' +
-    accounts.map(a => `<option value="${a.id}" ${a.id === selectedId ? 'selected' : ''}>${a.name}</option>`).join('');
+    accounts.map(a => `<option value="${a.id}" ${String(a.id) === String(selectedId ?? '') ? 'selected' : ''}>${escapeHtml(a.name)}</option>`).join('');
+
+  // القيمة المعروضة = التعديل اللي لسه ما اتحفظش (لو موجود) أو القيمة المحفوظة
+  const pv = (o, f) => (pendingOffers[o.id] && f in pendingOffers[o.id] ? pendingOffers[o.id][f] : o[f]);
 
   const offersWithComponents = await Promise.all(
     offers.map(async (o) => {
@@ -386,12 +442,12 @@ async function loadOffers() {
 
   document.querySelector('#offersTable tbody').innerHTML = offersWithComponents.map(o => `
     <tr>
-      <td><select onchange="updateOfferField(${o.id}, 'account_id', this.value)" style="width:110px">${accountOptions(o.account_id)}</select></td>
-      <td><input type="text" value="${o.ean || ''}" onchange="updateOfferField(${o.id}, 'ean', this.value)" style="width:110px"></td>
-      <td><input type="text" value="${o.bol_offer_id || ''}" onchange="updateOfferField(${o.id}, 'bol_offer_id', this.value)" style="width:110px"></td>
-      <td><input type="text" value="${o.reference || ''}" onchange="updateOfferField(${o.id}, 'reference', this.value)" style="width:100px"></td>
-      <td><input type="number" step="0.01" value="${o.sell_price}" onchange="updateOfferField(${o.id}, 'sell_price', this.value)" style="width:80px"></td>
-      <td><input type="number" min="1" value="${o.units_per_sale || 1}" onchange="updateOfferField(${o.id}, 'units_per_sale', this.value)" style="width:60px"></td>
+      <td><select onchange="stageOfferField(${o.id}, 'account_id', this.value, this)" style="width:110px">${accountOptions(pv(o, 'account_id'))}</select></td>
+      <td><input type="text" value="${escapeHtml(pv(o, 'ean') || '')}" onchange="stageOfferField(${o.id}, 'ean', this.value, this)" style="width:110px"></td>
+      <td><input type="text" value="${escapeHtml(pv(o, 'bol_offer_id') || '')}" onchange="stageOfferField(${o.id}, 'bol_offer_id', this.value, this)" style="width:110px"></td>
+      <td><input type="text" data-field="reference" value="${escapeHtml(pv(o, 'reference') || '')}" onchange="stageOfferField(${o.id}, 'reference', this.value, this)" style="width:100px"></td>
+      <td><input type="number" step="0.01" value="${escapeHtml(pv(o, 'sell_price'))}" onchange="stageOfferField(${o.id}, 'sell_price', this.value, this)" style="width:80px"></td>
+      <td><input type="number" min="1" value="${escapeHtml(pv(o, 'units_per_sale') || 1)}" onchange="stageOfferField(${o.id}, 'units_per_sale', this.value, this)" style="width:60px"></td>
       <td>
         ${o.components.length ? o.components.map(c => `${c.product_name} ×${c.quantity}`).join('<br>') : '-'}
         <button class="icon-btn" onclick="manageOfferComponents(${o.id})" title="إدارة المكونات الإضافية (لعروض الكومبو)">🧩</button>
@@ -432,14 +488,17 @@ window.manageOfferComponents = async (offerId) => {
   }
 };
 
-window.updateOfferField = async (offerId, field, value) => {
-  await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ [field]: value })
-  });
-  // تغيير عدد القطع بيغيّر الـ SKU تلقائي، فنحدّث الجدول عشان يظهر الـ SKU الجديد
-  if (field === 'units_per_sale') loadOffers();
+// التعديل بيتسجّل مؤقتاً بس - مش بيتحفظ إلا لما تدوس "حفظ"
+window.stageOfferField = (offerId, field, value, el) => {
+  pendingOffers[offerId] = { ...(pendingOffers[offerId] || {}), [field]: value };
+
+  // تغيير عدد القطع بيغيّر الـ SKU تلقائي (SKU الشجرة + العدد) ما لم تكن عدّلت الـ SKU بإيدك
+  if (field === 'units_per_sale' && !('reference' in pendingOffers[offerId]) && el) {
+    const n = Number(value) || 1;
+    const refInput = el.closest('tr')?.querySelector('[data-field="reference"]');
+    if (refInput) refInput.value = n > 1 ? `${currentOffersProductSku}${n}` : currentOffersProductSku;
+  }
+  refreshPendingNote();
 };
 
 window.moveOfferToProduct = async (offerId) => {
@@ -455,6 +514,8 @@ window.moveOfferToProduct = async (offerId) => {
     const data = await res.json();
     if (!res.ok) { alert(data.error || 'فشل النقل'); return; }
     alert(`تم النقل لـ "${data.movedTo.name}" (${data.movedTo.sku}) ✅\nواتغير الـ SKU بتاع الـ EAN لـ ${data.movedTo.sku}.`);
+    delete pendingOffers[offerId];
+    refreshPendingNote();
     loadOffers();
   } catch (e) {
     alert('مشكلة في الاتصال بالسيرفر');
@@ -463,8 +524,16 @@ window.moveOfferToProduct = async (offerId) => {
 
 window.deleteOffer = async (offerId) => {
   if (!confirm('متأكد إنك عايز تفك ربط الـ EAN ده؟')) return;
-  await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}`, { method: 'DELETE' });
-  loadOffers();
+  try {
+    const res = await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}`, { method: 'DELETE' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { alert('فشل الحذف: ' + (data.error || 'خطأ غير معروف')); return; }
+    delete pendingOffers[offerId];
+    refreshPendingNote();
+    loadOffers();
+  } catch (e) {
+    alert('مشكلة في الاتصال بالسيرفر');
+  }
 };
 
 document.getElementById('offerForm').addEventListener('submit', async (e) => {
@@ -530,7 +599,7 @@ window.syncProductToBol = async (id) => {
 
 // ---- توحيد SKUs الكومبو (طباخ + قناني) ----
 document.getElementById('convertGassBtn').addEventListener('click', async () => {
-  if (!confirm('هيدوّر على كل العروض اللي الـ SKU بتاعها فيه GASS، ويقلب الصيغة القديمة (DGK10GASS1) للموحدة (DGK1GASS10)، وينقلها لشجرة الطباخ ويربطها بشجرة القناني.\nشجرة الطباخ لازم تكون متعملة قبل كده (مثلاً DGK1). نكمّل؟')) return;
+  if (!confirm('هيدوّر على كل العروض اللي الـ SKU بتاعها فيه GASS، ويقلب أي صيغة قديمة (DGK4GASS1 أو DGK1GASS4) للصيغة الموحدة (DGK1BUT227S4)، وينقلها لشجرة الطباخ ويربطها بشجرة القناني.\nشجرة الطباخ لازم تكون متعملة قبل كده (مثلاً DGK1). نكمّل؟')) return;
   try {
     const res = await fetch('/api/products/convert-gass-skus', { method: 'POST' });
     const data = await res.json();

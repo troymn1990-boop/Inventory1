@@ -43,6 +43,21 @@ function autoReference(sku, units) {
 // الصيغة القديمة كانت مقلوبة: DGK + عدد القناني + GASS + موديل الطباخ (مثلاً DGK10GASS1)
 const GAS_TREE_SKU = process.env.GAS_TREE_SKU || 'BUT227S1';
 const GASS_REGEX = /^([A-Za-z]+)(\d+)GASS(\d+)$/i;
+// الصيغة الموحدة الحالية: SKU الطباخ + SKU شجرة القناني + عدد القناني (مثلاً DGK1BUT227S4)
+// الجزء الثابت من SKU القناني: BUT227S1 -> BUT227S (الرقم الأخير = قطعة واحدة، فبنستبدله بعدد القناني)
+const GAS_COMBO_PREFIX = process.env.GAS_COMBO_PREFIX || GAS_TREE_SKU.replace(/1$/, '');
+function comboRef(cookerSku, cans) { return `${cookerSku}${GAS_COMBO_PREFIX}${Number(cans)}`; }
+// لو الـ reference بالصيغة الموحدة بيرجع { prefix, cans }
+function parseComboRef(ref) {
+  const s = String(ref || '');
+  const g = GAS_COMBO_PREFIX.toUpperCase();
+  const up = s.toUpperCase();
+  const idx = up.lastIndexOf(g);
+  if (idx <= 0) return null;
+  const tail = s.slice(idx + g.length);
+  if (!/^[1-9]\d*$/.test(tail)) return null;
+  return { prefix: s.slice(0, idx), cans: Number(tail) };
+}
 
 // بيربط العرض بشجرة القناني: كل بيعة بتسحب cans قناني
 function linkGasComponent(offerId, cans) {
@@ -128,10 +143,10 @@ router.post('/', (req, res) => {
           let newRef = null;
           let cans = null;
           if (letters + second === sku && letters + first !== sku) {
-            newRef = `${letters}${second}GASS${first}`; // قديمة -> نقلبها
+            newRef = comboRef(sku, first); // قديمة -> نقلبها للصيغة الموحدة
             cans = Number(first);
           } else if (letters + first === sku) {
-            newRef = c.reference; // جديدة بالفعل
+            newRef = comboRef(sku, second);
             cans = Number(second);
           }
           if (newRef) {
@@ -153,7 +168,12 @@ router.post('/', (req, res) => {
         moveOffer.run(newId, c.id);
         touchedParents.add(c.product_id);
         adopted++;
-        if (rest) adoptedWithSuffix++;
+        const pc = parseComboRef(c.reference);
+        if (pc && pc.prefix === sku && sku !== GAS_TREE_SKU) {
+          db.prepare('UPDATE product_offers SET units_per_sale = 1 WHERE id = ?').run(c.id);
+          adoptedGas++;
+          if (linkGasComponent(c.id, pc.cans)) gasLinked++;
+        } else if (rest) adoptedWithSuffix++;
       }
 
       // الأشجار المؤقتة (اللي اتعملت من الاستيراد باسم "بدون اسم") اللي فضيت بعد النقل بتتمسح تلقائي
@@ -306,8 +326,8 @@ router.post('/:id/normalize-references', (req, res) => {
       const comp = gas ? gasComp.get(o.id, gas.id) : null;
       let newRef, newUnits;
       if (comp) {
-        // عرض كومبو (طباخ + قناني): SKU الشجرة + GASS + عدد القناني، وقطعة طباخ واحدة بس لكل بيعة
-        newRef = `${product.sku}GASS${comp.quantity}`;
+        // عرض كومبو (طباخ + قناني): SKU الشجرة + SKU شجرة القناني + عدد القناني (DGK1BUT227S4)، وقطعة طباخ واحدة بس لكل بيعة
+        newRef = comboRef(product.sku, comp.quantity);
         newUnits = 1;
         combos++;
         if ((o.units_per_sale || 1) !== 1) unitsReset++;
@@ -326,8 +346,16 @@ router.post('/:id/normalize-references', (req, res) => {
 });
 
 router.delete('/:id/offers/:offerId', (req, res) => {
-  db.prepare('DELETE FROM product_offers WHERE id = ? AND product_id = ?').run(req.params.offerId, req.params.id);
-  res.json({ ok: true });
+  try {
+    db.transaction(() => {
+      // المبيعات القديمة بتفضل محفوظة (للتقارير) بس بتتفك من العرض المحذوف - وده كان سبب إن الحذف بيفشل
+      db.prepare('UPDATE sales SET offer_id = NULL WHERE offer_id = ?').run(req.params.offerId);
+      db.prepare('DELETE FROM product_offers WHERE id = ? AND product_id = ?').run(req.params.offerId, req.params.id);
+    })();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: 'تعذّر حذف الـ EAN: ' + e.message });
+  }
 });
 
 // دمج منتج أساسي كامل (كل EANs بتاعته) جوه منتج أساسي تاني دفعة واحدة
@@ -483,7 +511,7 @@ router.post('/convert-gass-skus', (req, res) => {
   const offers = db
     .prepare('SELECT id, product_id, reference FROM product_offers WHERE reference IS NOT NULL')
     .all()
-    .filter((o) => GASS_REGEX.test(o.reference));
+    .filter((o) => GASS_REGEX.test(o.reference) || parseComboRef(o.reference));
 
   const stats = { found: offers.length, converted: 0, moved: 0, linked: 0, alreadyOk: 0 };
   const skipped = [];
@@ -493,15 +521,24 @@ router.post('/convert-gass-skus', (req, res) => {
 
   db.transaction(() => {
     for (const o of offers) {
-      const [, letters, first, second] = GASS_REGEX.exec(o.reference);
-      const oldTree = findTree.get(letters + second); // DGK10GASS1 -> شجرة DGK1
-      const newTree = findTree.get(letters + first); // DGK1GASS10 -> شجرة DGK1
+      const gm = GASS_REGEX.exec(o.reference);
       let tree, newRef, cans;
 
-      if (oldTree && newTree) { skipped.push(`${o.reference} (ملتبس: الشجرتين ${oldTree.sku} و ${newTree.sku} موجودين)`); continue; }
-      if (oldTree) { tree = oldTree; newRef = `${letters}${second}GASS${first}`; cans = Number(first); }
-      else if (newTree) { tree = newTree; newRef = o.reference; cans = Number(second); }
-      else { skipped.push(`${o.reference} (مفيش شجرة طباخ بـ SKU مناسب)`); continue; }
+      if (gm) {
+        const [, letters, first, second] = gm;
+        const oldTree = findTree.get(letters + second); // DGK4GASS1 -> شجرة DGK1، 4 قناني
+        const newTree = findTree.get(letters + first); // DGK1GASS4 -> شجرة DGK1، 4 قناني
+        if (oldTree && newTree) { skipped.push(`${o.reference} (ملتبس: الشجرتين ${oldTree.sku} و ${newTree.sku} موجودين)`); continue; }
+        if (oldTree) { tree = oldTree; cans = Number(first); }
+        else if (newTree) { tree = newTree; cans = Number(second); }
+        else { skipped.push(`${o.reference} (مفيش شجرة طباخ بـ SKU مناسب)`); continue; }
+      } else {
+        const pc = parseComboRef(o.reference); // DGK1BUT227S4
+        tree = pc && findTree.get(pc.prefix);
+        if (!tree) { skipped.push(`${o.reference} (مفيش شجرة طباخ بـ SKU مناسب)`); continue; }
+        cans = pc.cans;
+      }
+      newRef = comboRef(tree.sku, cans);
 
       if (tree.sku === GAS_TREE_SKU) { skipped.push(`${o.reference} (الشجرة هي شجرة القناني نفسها)`); continue; }
 
