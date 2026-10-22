@@ -194,7 +194,17 @@ router.post('/', (req, res) => {
 });
 
 router.put('/:id', (req, res) => {
-  const { name, cost_price, stock_qty, low_stock_threshold, category, image_url, active } = req.body;
+  const { sku, name, cost_price, stock_qty, low_stock_threshold, category, image_url, active } = req.body;
+  const newSku = typeof sku === 'string' ? sku.trim() : '';
+  if (newSku) {
+    const current = db.prepare('SELECT sku FROM products WHERE id = ?').get(req.params.id);
+    if (!current) return res.status(404).json({ error: 'المنتج مش موجود' });
+    if (current.sku !== newSku) {
+      const dup = db.prepare('SELECT id FROM products WHERE sku = ? AND id != ?').get(newSku, req.params.id);
+      if (dup) return res.status(400).json({ error: 'SKU ده موجود قبل كده' });
+      db.prepare('UPDATE products SET sku = ? WHERE id = ?').run(newSku, req.params.id);
+    }
+  }
   db.prepare(
     `UPDATE products SET
       name = COALESCE(?, name),

@@ -156,7 +156,7 @@ function openModal(product = null) {
   document.getElementById('modalTitle').textContent = product ? 'تعديل المنتج الأساسي' : 'إضافة منتج أساسي جديد';
   document.getElementById('productId').value = product?.id || '';
   document.getElementById('f_sku').value = product?.sku || '';
-  document.getElementById('f_sku').disabled = !!product;
+  document.getElementById('f_sku').disabled = false;
   document.getElementById('f_name').value = product?.name || '';
   document.getElementById('f_cost').value = product?.cost_price ?? '';
   document.getElementById('f_stock').value = product?.stock_qty ?? '';
@@ -302,7 +302,6 @@ document.getElementById('productForm').addEventListener('submit', async (e) => {
     // منتج جديد اتحفظ - نفضل المودال مفتوح ونوريله قسم رفع الصورة على طول
     currentEditingProductId = data.id;
     document.getElementById('productId').value = data.id;
-    document.getElementById('f_sku').disabled = true;
     document.getElementById('modalTitle').textContent = 'تم الحفظ! تقدر تضيف صورة دلوقتي';
     document.getElementById('imageSection').style.display = 'block';
     if (data.adopted > 0) {
