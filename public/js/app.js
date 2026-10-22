@@ -467,14 +467,17 @@ window.manageOfferComponents = async (offerId) => {
     const quantity = prompt('كام قطعة منه بتتسحب مع كل عملية بيع من الـ EAN ده؟ (مثلاً: 4)');
     if (!quantity) return;
 
+    const applyToAll = confirm(`تضيف "${componentSku} ×${quantity}" لكل الـ EANs اللي في الشجرة دي؟\n\nموافق = لكلهم\nإلغاء = للـ EAN ده بس`);
     const res = await fetch(`/api/products/${currentOffersProductId}/offers/${offerId}/components`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ componentSku, quantity })
+      body: JSON.stringify({ componentSku, quantity, applyToAll })
     });
     const data = await res.json();
     if (!res.ok) { alert(data.error || 'فشل الإضافة'); return; }
-    alert('تمت إضافة المكون ✅');
+    alert(applyToAll
+      ? `تمت إضافة المكون لـ ${data.applied} EAN ✅\nاضغط 🔤 توحيد الـ SKU عشان الـ SKUs تتحدث.`
+      : 'تمت إضافة المكون ✅');
     loadOffers();
   } else if (action === '2') {
     if (!confirm('متأكد إنك عايز تمسح كل المكونات الإضافية بتاعة الـ EAN ده؟')) return;

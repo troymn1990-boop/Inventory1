@@ -488,11 +488,24 @@ router.post('/:id/offers/:offerId/components', (req, res) => {
     return res.status(400).json({ error: 'المنتج ده أصلاً المنتج الأساسي بتاع الـ EAN ده' });
   }
 
-  const info = db
-    .prepare('INSERT INTO offer_components (offer_id, product_id, quantity) VALUES (?, ?, ?)')
-    .run(req.params.offerId, componentProduct.id, Number(quantity));
+  const qty = Number(quantity);
+  if (!(qty > 0)) return res.status(400).json({ error: 'الكمية لازم تكون رقم أكبر من صفر' });
 
-  res.json({ ok: true, id: info.lastInsertRowid });
+  // applyToAll: نفس المكون بنفس الكمية يتضاف لكل EANs الشجرة (ولو EAN عنده المكون ده قبل كده بيتحدث بالكمية الجديدة)
+  const targets = req.body.applyToAll
+    ? db.prepare('SELECT id FROM product_offers WHERE product_id = ?').all(req.params.id).map((o) => o.id)
+    : [offer.id];
+  const del = db.prepare('DELETE FROM offer_components WHERE offer_id = ? AND product_id = ?');
+  const ins = db.prepare('INSERT INTO offer_components (offer_id, product_id, quantity) VALUES (?, ?, ?)');
+  let lastId = null;
+  db.transaction(() => {
+    for (const oid of targets) {
+      del.run(oid, componentProduct.id);
+      lastId = ins.run(oid, componentProduct.id, qty).lastInsertRowid;
+    }
+  })();
+
+  res.json({ ok: true, id: lastId, applied: targets.length });
 });
 
 router.delete('/:id/offers/:offerId/components/:componentId', (req, res) => {
