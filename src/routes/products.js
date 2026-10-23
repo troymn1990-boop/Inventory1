@@ -6,6 +6,7 @@ const { parse } = require('csv-parse/sync');
 const db = require('../db');
 const { requireAuth } = require('../middleware/auth');
 const { pushProductToBol, startPushAllJob, getPushJobStatus } = require('../pushToBol');
+const bol = require('../bolClient');
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
@@ -545,6 +546,51 @@ router.post('/:id/push-to-bol', async (req, res) => {
     res.status(400).json({ ok: false, error: e.message });
   }
 });
+
+// ================= سحب صور المنتجات من bol.com =================
+// بيدوّر على كل منتج مالوش صورة، ياخد أول EAN ليه (بحساب bol.com مربوط)، يسحب الصورة الأساسية من الكتالوج ويحفظ رابطها.
+// المنتجات اللي ليها صورة (مرفوعة أو رابط بإيدك) مش بيتلمس.
+let imageJob = { status: 'idle' };
+async function runFetchImages(force) {
+  const rows = db
+    .prepare(
+      `SELECT p.id, p.sku, o.ean, o.account_id
+       FROM products p JOIN product_offers o ON o.product_id = p.id
+       WHERE ${force ? '1=1' : "(p.image_url IS NULL OR p.image_url = '')"} AND o.ean IS NOT NULL AND o.ean != '' AND o.account_id IS NOT NULL
+       ORDER BY p.id, o.id`
+    )
+    .all();
+  const seen = new Set();
+  const todo = rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+  imageJob = { status: 'running', total: todo.length, done: 0, found: 0, missing: 0, failed: 0 };
+  const accounts = new Map();
+  const setImg = db.prepare('UPDATE products SET image_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+  for (const r of todo) {
+    try {
+      if (!accounts.has(r.account_id)) accounts.set(r.account_id, db.prepare('SELECT * FROM bol_accounts WHERE id = ?').get(r.account_id));
+      const account = accounts.get(r.account_id);
+      const url = account ? await bol.getProductImageUrl(account, r.ean) : null;
+      if (url) { setImg.run(url, r.id); imageJob.found++; } else imageJob.missing++;
+    } catch (e) {
+      imageJob.failed++;
+      imageJob.lastError = e.response?.data?.detail || e.response?.data?.title || e.message;
+    }
+    imageJob.done++;
+    await new Promise((res) => setTimeout(res, 250));
+  }
+  imageJob.status = 'done';
+}
+
+router.post('/fetch-images', (req, res) => {
+  if (imageJob.status === 'running') return res.json({ ok: true, job: imageJob });
+  runFetchImages(!!req.body?.force).catch((e) => { imageJob = { status: 'error', error: e.message }; });
+  res.json({ ok: true, job: { status: 'running', total: 0, done: 0 } });
+});
+// تلقائي: بعد تشغيل السيرفر بنص دقيقة، وبعدها كل 6 ساعات - بيكمّل صور المنتجات الجديدة اللي لسه ملهاش صورة
+const autoImages = () => { if (imageJob.status !== 'running') runFetchImages(false).catch(() => {}); };
+setTimeout(autoImages, 30000);
+setInterval(autoImages, 6 * 60 * 60 * 1000);
+router.get('/fetch-images/status', (req, res) => res.json({ job: imageJob }));
 
 // تحويل كل عروض الكومبو (طباخ + قناني) الموجودة: يقلب الـ SKU القديم للصيغة الموحدة،
 // ينقل العرض لشجرة الطباخ، ويربطه بشجرة القناني بالعدد المناسب

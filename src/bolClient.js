@@ -192,8 +192,23 @@ async function downloadOfferExportCsv(account, reportId) {
   return res.data; // نص CSV خام
 }
 
+// رابط الصورة الأساسية لمنتج (EAN) من كتالوج bol.com - بيرجع null لو مفيش صورة
+async function getProductImageUrl(account, ean) {
+  const data = await bolRequest(account, 'get', `/products/${encodeURIComponent(ean)}/assets`, {
+    params: { usage: 'PRIMARY' }
+  });
+  const asset = (data.assets || [])[0];
+  const variants = asset?.variants || [];
+  if (!variants.length) return null;
+  // نفضّل حجم "medium" (كفاية للجدول وخفيف)، وإلا أكبر واحدة متاحة
+  const medium = variants.find((v) => v.size === 'medium');
+  if (medium) return medium.url;
+  return variants.sort((a, b) => (b.width || 0) - (a.width || 0))[0].url || null;
+}
+
 module.exports = {
   getAccessToken,
+  getProductImageUrl,
   getOpenOrders,
   getOrderDetails,
   updateOfferStock,

@@ -680,6 +680,33 @@ window.syncProductToBol = async (id) => {
 };
 
 // ---- توحيد SKUs الكومبو (طباخ + قناني) ----
+document.getElementById('fetchImagesBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('fetchImagesBtn');
+  btn.disabled = true;
+  const label = btn.textContent;
+  try {
+    await fetch('/api/products/fetch-images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    let job;
+    do {
+      await new Promise(r => setTimeout(r, 2000));
+      job = (await (await fetch('/api/products/fetch-images/status')).json()).job;
+      btn.textContent = `🖼️ ${job.done || 0}/${job.total || 0}...`;
+    } while (job.status === 'running');
+    if (job.status === 'error') { alert('فشل سحب الصور: ' + job.error); }
+    else {
+      alert(`تم! اتسحبت صور ${job.found} منتج من bol.com ✅` +
+        (job.missing ? `\n${job.missing} منتج مفيش ليهم صورة على bol (تقدر ترفع صورة بإيدك بـ ✏️).` : '') +
+        (job.failed ? `\n⚠️ ${job.failed} فشلوا${job.lastError ? ' - آخر خطأ: ' + job.lastError : ''}` : ''));
+    }
+    loadProducts();
+  } catch (e) {
+    alert('مشكلة في الاتصال بالسيرفر');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+});
+
 document.getElementById('convertGassBtn').addEventListener('click', async () => {
   if (!confirm('هيدوّر على كل العروض اللي الـ SKU بتاعها فيه GASS، ويقلب أي صيغة قديمة (DGK4GASS1 أو DGK1GASS4) للصيغة الموحدة (DGK1BUT227S4)، وينقلها لشجرة الطباخ ويربطها بشجرة القناني.\nشجرة الطباخ لازم تكون متعملة قبل كده (مثلاً DGK1). نكمّل؟')) return;
   try {
