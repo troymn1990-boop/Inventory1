@@ -223,6 +223,18 @@ select {
 #offersPendingNote { color: #a8650a !important; background: #fff7e8; border-radius: 8px; padding: 0 10px; }
 #offersPendingNote:empty { background: none; padding: 0; }
 
+#offersGroupTabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 14px 0 0; border-bottom: 2px solid var(--line); }
+.group-tab {
+  font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; padding: 9px 16px; margin-bottom: -2px;
+  background: #fff; color: var(--muted); border: 1px solid var(--line); border-bottom: 2px solid var(--line); border-radius: 10px 10px 0 0;
+  transition: background .15s, color .15s;
+}
+.group-tab:hover { background: var(--primary-tint); color: var(--ink); }
+.group-tab.active { background: var(--primary-tint); color: var(--primary-dark); border-bottom-color: var(--primary); }
+.group-count { display: inline-block; min-width: 22px; text-align: center; margin-inline-start: 4px; padding: 0 6px; border-radius: 999px; background: #fff; font-size: 12px; }
+.offers-modal-box #offersGroupTabs + table { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
+.offers-modal-box tr.group-row td { border-top: none; }
+
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
