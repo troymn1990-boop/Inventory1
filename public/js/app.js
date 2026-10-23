@@ -447,7 +447,7 @@ async function loadOffers() {
     })
   );
 
-  document.querySelector('#offersTable tbody').innerHTML = offersWithComponents.map(o => `
+  const rowHtml = (o) => `
     <tr>
       <td><select onchange="stageOfferField(${o.id}, 'account_id', this.value, this)" style="width:110px">${accountOptions(pv(o, 'account_id'))}</select></td>
       <td><input type="text" value="${escapeHtml(pv(o, 'ean') || '')}" onchange="stageOfferField(${o.id}, 'ean', this.value, this)" style="width:110px"></td>
@@ -464,8 +464,58 @@ async function loadOffers() {
         <button class="icon-btn" onclick="deleteOffer(${o.id})">🗑️</button>
       </td>
     </tr>
+  `;
+
+  // تقسيم الـ EANs لمجموعات حسب نوع العرض (طباخ لوحده / طباخ + 4 قناني / + 8 ...)
+  const groups = new Map();
+  const addTo = (key, order, title, o, cans = null) => {
+    if (!groups.has(key)) groups.set(key, { order, title, offers: [], cans });
+    groups.get(key).offers.push(o);
+  };
+  for (const o of offersWithComponents) {
+    if (o.components.length) {
+      const cans = o.components.length === 1 ? Number(o.components[0].quantity) : null;
+      const label = o.components.map(c => `${c.product_name} ×${c.quantity}`).join(' + ');
+      addTo('c:' + label, 1000 + (cans || 0), `🔥 ${currentOffersProductSku} + ${label}`, o, cans);
+    } else {
+      const m = /BUT227S(\d+)$/i.exec(o.reference || '');
+      if (m) addTo('m:' + m[1], 5000 + Number(m[1]), `⚠️ الـ SKU بيقول ${m[1]} قناني بس المكوّن مش مضاف`, o, Number(m[1]));
+      else {
+        const u = Number(o.units_per_sale) || 1;
+        addTo('u:' + u, u === 1 ? 0 : 100 + u, u === 1 ? `📦 ${currentOffersProductSku} لوحده (من غير قناني)` : `📦 ${currentOffersProductSku} × ${u} قطع`, o);
+      }
+    }
+  }
+  const sorted = [...groups.values()].sort((a, b) => a.order - b.order);
+  document.querySelector('#offersTable tbody').innerHTML = sorted.map(g => `
+    <tr class="group-row"><td colspan="8" style="background:#eef3ee;font-weight:700;padding:10px;">
+      ${escapeHtml(g.title)} <span style="font-weight:400">(${g.offers.length} EAN)</span>
+      <button type="button" class="btn-secondary" style="margin-right:10px;padding:2px 8px;font-size:12px" onclick="applyComponentToGroup('${g.offers.map(x => x.id).join(',')}', ${g.cans || 'null'})">🧩 ضبط المكوّن لكل المجموعة</button>
+    </td></tr>
+    ${g.offers.map(rowHtml).join('')}
   `).join('') || '<tr><td colspan="8">مفيش EANs مرتبطة لسه - ضيف واحد تحت</td></tr>';
 }
+
+// يضيف/يحدّث نفس المكوّن (مثلاً BUT227S1 × 4) لكل EANs مجموعة بعينها
+window.applyComponentToGroup = async (idsStr, defaultCans) => {
+  const componentSku = prompt('SKU شجرة المكوّن (مثلاً شجرة القناني):', 'BUT227S1');
+  if (!componentSku) return;
+  const quantity = prompt('كام قطعة منه مع كل بيعة؟ (مثلاً: 4)', defaultCans || '');
+  if (!quantity) return;
+  const ids = idsStr.split(',');
+  let ok = 0;
+  const errs = [];
+  for (const id of ids) {
+    const res = await fetch(`/api/products/${currentOffersProductId}/offers/${id}/components`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ componentSku, quantity })
+    });
+    if (res.ok) ok++; else errs.push((await res.json().catch(() => ({}))).error || 'خطأ');
+  }
+  alert(`تم ضبط المكوّن لـ ${ok} من ${ids.length} EAN ✅` + (errs.length ? '\n' + errs[0] : '') + '\nاضغط 🔤 توحيد الـ SKU عشان الـ SKUs تتحدث.');
+  loadOffers();
+};
 
 window.manageOfferComponents = async (offerId) => {
   const action = prompt('اكتب "1" لإضافة مكون جديد، أو "2" لمسح كل المكونات الإضافية بتاعة الـ EAN ده:');
