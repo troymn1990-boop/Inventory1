@@ -270,11 +270,14 @@ window.mergeProductInto = async (productId, sku) => {
 };
 
 window.editProduct = async (id) => {
-  const res = await fetch('/api/products?search=&page=1&pageSize=1000');
-  const data = await res.json();
-  allProductsCache = data.products;
-  const product = data.products.find(p => p.id === id);
-  if (product) openModal(product);
+  try {
+    const res = await fetch('/api/products/' + id);
+    const data = await res.json();
+    if (!res.ok || !data.product) { alert('مقدرتش أفتح المنتج: ' + (data.error || 'خطأ غير معروف')); return; }
+    openModal(data.product);
+  } catch (e) {
+    alert('مشكلة في الاتصال بالسيرفر أو في فتح نافذة التعديل: ' + e.message);
+  }
 };
 
 window.deleteProduct = async (id) => {

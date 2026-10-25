@@ -96,6 +96,13 @@ router.get('/', (req, res) => {
   res.json({ total, page: Number(page), pageSize: Number(pageSize), products: rows });
 });
 
+// منتج واحد بالـ id (بيستخدمه زرار ✏️ التعديل)
+router.get('/:id', (req, res) => {
+  const row = db.prepare('SELECT * FROM products WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'المنتج مش موجود' });
+  res.json({ product: row });
+});
+
 router.post('/', (req, res) => {
   const { sku, name, cost_price, stock_qty, low_stock_threshold, category, image_url } = req.body;
   if (!sku || !name) return res.status(400).json({ error: 'SKU والاسم مطلوبين' });
