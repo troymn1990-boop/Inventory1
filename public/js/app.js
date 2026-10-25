@@ -86,12 +86,12 @@ async function loadOverview() {
 
 // ================= المنتجات (الشجرة) =================
 // أيقونات صفوف جدول المنتجات (SVG خطية بنفس الشكل)
-const svg = (d) => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const svg = (d) => `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 const ICONS = {
-  eans: svg('<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9v6M10 9v6M13 9v6M16.5 9v6"/>'),
-  merge: svg('<circle cx="6" cy="5.5" r="2.3"/><circle cx="6" cy="18.5" r="2.3"/><circle cx="18" cy="12" r="2.3"/><path d="M6 8v8M8 6.5c5 0 5 5.5 7.7 5.5"/>'),
+  eans: svg('<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>'),
+  merge: svg('<rect x="3" y="3" width="11" height="11" rx="2"/><rect x="10" y="10" width="11" height="11" rx="2"/>'),
   edit: svg('<path d="M4 20h4L19 9a2.1 2.1 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>'),
-  sync: svg('<path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4"/>'),
+  sync: svg('<path d="M17.5 18a4 4 0 0 0 .5-8 6 6 0 0 0-11.6 1.5A4.5 4.5 0 0 0 7 18z"/><path d="M12 17v-6M9.5 13l2.5-2.5 2.5 2.5"/>'),
   pin: svg('<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>'),
   trash: svg('<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>')
 };
