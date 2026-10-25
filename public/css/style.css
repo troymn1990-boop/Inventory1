@@ -259,3 +259,20 @@ select {
 .pinned-row:hover td { background: #fff3da; }
 .icon-btn.pin-off { opacity: .35; filter: grayscale(1); }
 .icon-btn.pin-off:hover, .icon-btn.pin-on { opacity: 1; filter: none; }
+
+/* ---------- أيقونات إجراءات الصفوف ---------- */
+#productsTable td:last-child { white-space: nowrap; }
+#productsTable .icon-btn {
+  width: 36px; height: 36px; padding: 0; margin: 0 2px; display: inline-flex; align-items: center; justify-content: center;
+  color: #5b6b80; background: transparent; border-radius: 10px; vertical-align: middle;
+  transition: background .15s, color .15s;
+}
+#productsTable .icon-btn svg { display: block; }
+#productsTable .icon-btn[data-act="eans"]:hover { background: #e3f4ef; color: #0b7a5a; }
+#productsTable .icon-btn[data-act="merge"]:hover { background: #efeafd; color: #6a3fd0; }
+#productsTable .icon-btn[data-act="sync"]:hover { background: var(--primary-tint); color: var(--primary-dark); }
+#productsTable .icon-btn[data-act="edit"]:hover { background: #fff3da; color: #a8650a; }
+#productsTable .icon-btn[data-act="trash"]:hover { background: #fde8e6; color: var(--danger); }
+#productsTable .icon-btn[data-act="pin"]:hover, #productsTable .icon-btn.pin-on[data-act="pin"] { background: #fff3da; color: #c27a0a; }
+#productsTable .icon-btn.pin-on svg { fill: currentColor; }
+#productsTable .icon-btn.pin-off { opacity: .6; filter: none; }

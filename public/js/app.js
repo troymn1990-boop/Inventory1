@@ -85,6 +85,17 @@ async function loadOverview() {
 }
 
 // ================= المنتجات (الشجرة) =================
+// أيقونات صفوف جدول المنتجات (SVG خطية بنفس الشكل)
+const svg = (d) => `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICONS = {
+  eans: svg('<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9v6M10 9v6M13 9v6M16.5 9v6"/>'),
+  merge: svg('<circle cx="6" cy="5.5" r="2.3"/><circle cx="6" cy="18.5" r="2.3"/><circle cx="18" cy="12" r="2.3"/><path d="M6 8v8M8 6.5c5 0 5 5.5 7.7 5.5"/>'),
+  edit: svg('<path d="M4 20h4L19 9a2.1 2.1 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>'),
+  sync: svg('<path d="M20 11a8 8 0 0 0-14.5-4M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.5 4M20 20v-4h-4"/>'),
+  pin: svg('<path d="M9 4h6l-1 6 3 3H7l3-3z"/><path d="M12 13v7"/>'),
+  trash: svg('<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>')
+};
+
 let productsState = { page: 1, pageSize: 50, search: '', lowStockOnly: false };
 
 async function loadProducts() {
@@ -107,12 +118,12 @@ async function loadProducts() {
       <td>${p.stock_qty}</td>
       <td><span class="badge">${p.offers_count} EAN</span></td>
       <td>
-        <button class="icon-btn" onclick="openOffersModal(${p.id}, '${p.sku.replace(/'/g, "\\'")}')" title="إدارة الـ EANs المرتبطة">🔗</button>
-        <button class="icon-btn" onclick="mergeProductInto(${p.id}, '${p.sku.replace(/'/g, "\\'")}')" title="دمج الشجرة دي كاملة في منتج تاني">🔀</button>
-        <button class="icon-btn" onclick="syncProductToBol(${p.id})" title="مزامنة مع bol.com">🔄</button>
-        <button class="icon-btn ${p.pinned ? 'pin-on' : 'pin-off'}" onclick="togglePin(${p.id})" title="${p.pinned ? 'إلغاء التثبيت' : 'تثبيت في أول القائمة'}">📌</button>
-        <button class="icon-btn" onclick="editProduct(${p.id})">✏️</button>
-        <button class="icon-btn" onclick="deleteProduct(${p.id})">🗑️</button>
+        <button class="icon-btn" onclick="openOffersModal(${p.id}, '${p.sku.replace(/'/g, "\\'")}')" title="إدارة الـ EANs المرتبطة" data-act="eans">${ICONS.eans}</button>
+        <button class="icon-btn" onclick="mergeProductInto(${p.id}, '${p.sku.replace(/'/g, "\\'")}')" title="دمج الشجرة دي كاملة في منتج تاني" data-act="merge">${ICONS.merge}</button>
+        <button class="icon-btn" onclick="syncProductToBol(${p.id})" title="مزامنة مع bol.com" data-act="sync">${ICONS.sync}</button>
+        <button class="icon-btn ${p.pinned ? 'pin-on' : 'pin-off'}" onclick="togglePin(${p.id})" title="${p.pinned ? 'إلغاء التثبيت' : 'تثبيت في أول القائمة'}" data-act="pin">${ICONS.pin}</button>
+        <button class="icon-btn" onclick="editProduct(${p.id})" title="تعديل المنتج" data-act="edit">${ICONS.edit}</button>
+        <button class="icon-btn" onclick="deleteProduct(${p.id})" title="حذف المنتج" data-act="trash">${ICONS.trash}</button>
       </td>
     </tr>
   `).join('') || '<tr><td colspan="7">مفيش نتائج</td></tr>';
