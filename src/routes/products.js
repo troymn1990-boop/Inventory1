@@ -89,11 +89,20 @@ router.get('/', (req, res) => {
   const rows = db
     .prepare(
       `SELECT p.*, (SELECT COUNT(*) FROM product_offers o WHERE o.product_id = p.id AND o.active = 1) as offers_count
-       FROM products p ${where} ORDER BY p.updated_at DESC LIMIT ? OFFSET ?`
+       FROM products p ${where} ORDER BY p.pinned DESC, p.updated_at DESC LIMIT ? OFFSET ?`
     )
     .all(...params, Number(pageSize), offset);
 
   res.json({ total, page: Number(page), pageSize: Number(pageSize), products: rows });
+});
+
+// تثبيت/إلغاء تثبيت منتج في أول القائمة
+router.post('/:id/pin', (req, res) => {
+  const row = db.prepare('SELECT id, pinned FROM products WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'المنتج مش موجود' });
+  const pinned = req.body && typeof req.body.pinned !== 'undefined' ? (req.body.pinned ? 1 : 0) : (row.pinned ? 0 : 1);
+  db.prepare('UPDATE products SET pinned = ? WHERE id = ?').run(pinned, row.id); // من غير ما نغيّر updated_at عشان الترتيب جوه المثبتين ميتلخبطش
+  res.json({ ok: true, pinned });
 });
 
 // منتج واحد بالـ id (بيستخدمه زرار ✏️ التعديل)

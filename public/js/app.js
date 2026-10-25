@@ -99,9 +99,9 @@ async function loadProducts() {
 
   const tbody = document.querySelector('#productsTable tbody');
   tbody.innerHTML = data.products.map(p => `
-    <tr class="${p.stock_qty <= p.low_stock_threshold ? 'low-stock-row' : ''}">
+    <tr class="${p.stock_qty <= p.low_stock_threshold ? 'low-stock-row' : ''} ${p.pinned ? 'pinned-row' : ''}">
       <td>${p.image_url ? `<img src="${p.image_url}" class="product-thumb">` : `<div class="product-thumb-placeholder">📦</div>`}</td>
-      <td>${p.sku}</td>
+      <td>${p.pinned ? '📌 ' : ''}${p.sku}</td>
       <td>${p.name}</td>
       <td>${money(p.cost_price)}</td>
       <td>${p.stock_qty}</td>
@@ -110,6 +110,7 @@ async function loadProducts() {
         <button class="icon-btn" onclick="openOffersModal(${p.id}, '${p.sku.replace(/'/g, "\\'")}')" title="إدارة الـ EANs المرتبطة">🔗</button>
         <button class="icon-btn" onclick="mergeProductInto(${p.id}, '${p.sku.replace(/'/g, "\\'")}')" title="دمج الشجرة دي كاملة في منتج تاني">🔀</button>
         <button class="icon-btn" onclick="syncProductToBol(${p.id})" title="مزامنة مع bol.com">🔄</button>
+        <button class="icon-btn ${p.pinned ? 'pin-on' : 'pin-off'}" onclick="togglePin(${p.id})" title="${p.pinned ? 'إلغاء التثبيت' : 'تثبيت في أول القائمة'}">📌</button>
         <button class="icon-btn" onclick="editProduct(${p.id})">✏️</button>
         <button class="icon-btn" onclick="deleteProduct(${p.id})">🗑️</button>
       </td>
@@ -263,6 +264,17 @@ window.mergeProductInto = async (productId, sku) => {
     const data = await res.json();
     if (!res.ok) { alert(data.error || 'فشل الدمج'); return; }
     alert(`تم! ${data.movedOffers} EAN اتنقلوا لـ "${data.targetProduct.name}" (${data.targetProduct.sku}) ✅\nواتغير الـ SKU بتاعهم لـ ${data.targetProduct.sku}، والمنتج "${sku}" اتمسح تلقائي.\nاضغط 🔄 على الشجرة لو عايز SKU الجديد يتبعت لـ bol.com.`);
+    loadProducts();
+  } catch (e) {
+    alert('مشكلة في الاتصال بالسيرفر');
+  }
+};
+
+window.togglePin = async (id) => {
+  try {
+    const res = await fetch(`/api/products/${id}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); alert('فشل التثبيت: ' + (d.error || 'خطأ')); return; }
+    productsState.page = 1;
     loadProducts();
   } catch (e) {
     alert('مشكلة في الاتصال بالسيرفر');

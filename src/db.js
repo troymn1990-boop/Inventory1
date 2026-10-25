@@ -153,6 +153,16 @@ function migrateImageUrlColumnIfNeeded() {
 }
 migrateImageUrlColumnIfNeeded();
 
+// ---------- ترحيل: عمود pinned (تثبيت المنتجات في أول القائمة) ----------
+function migratePinnedColumnIfNeeded() {
+  const columns = db.prepare("PRAGMA table_info(products)").all().map((c) => c.name);
+  if (!columns.includes('pinned')) {
+    db.exec('ALTER TABLE products ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+    console.log('[ترحيل] تم إضافة عمود pinned لجدول products');
+  }
+}
+migratePinnedColumnIfNeeded();
+
 // ---------- ترحيل: إضافة عمود units_per_sale لو الجدول كان موجود من قبل بدونه ----------
 function migrateUnitsPerSaleColumnIfNeeded() {
   const columns = db.prepare("PRAGMA table_info(product_offers)").all().map((c) => c.name);

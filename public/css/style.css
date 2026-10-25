@@ -253,3 +253,9 @@ select {
   .modal-box.offers-modal-box { width: 100%; }
   table { display: block; overflow-x: auto; }
 }
+
+/* ---------- منتجات مثبتة ---------- */
+.pinned-row td { background: #fffaf0; }
+.pinned-row:hover td { background: #fff3da; }
+.icon-btn.pin-off { opacity: .35; filter: grayscale(1); }
+.icon-btn.pin-off:hover, .icon-btn.pin-on { opacity: 1; filter: none; }
